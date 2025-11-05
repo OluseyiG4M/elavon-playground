@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Gear4music\ElavonPlayground\V1\EPG;
 
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\AccountsApi;
+use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\GooglePayPaymentsApi;
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\OrdersApi;
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\PaymentSessionsApi;
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\TransactionsApi;
 use Gear4music\ElavonPlayground\V1\EPG\Model\Blik;
 use Gear4music\ElavonPlayground\V1\EPG\Model\Contact;
 use Gear4music\ElavonPlayground\V1\EPG\Model\FailureWrapper;
+use Gear4music\ElavonPlayground\V1\EPG\Model\GooglePayPayment;
+use Gear4music\ElavonPlayground\V1\EPG\Model\GooglePayPaymentInput;
 use Gear4music\ElavonPlayground\V1\EPG\Model\HppType;
 use Gear4music\ElavonPlayground\V1\EPG\Model\Order;
 use Gear4music\ElavonPlayground\V1\EPG\Model\OrderInput;
@@ -35,6 +38,7 @@ class Client
     private OrdersApi $ordersApi;
     private PaymentSessionsApi $paymentSessionsApi;
     private AccountsApi $accountsApi;
+    private GooglePayPaymentsApi $googlePayPaymentsApi;
 
     private string $host;
 
@@ -58,6 +62,10 @@ class Client
             $configuration
         );
         $this->accountsApi = new AccountsApi(
+            new \GuzzleHttp\Client(),
+            $configuration
+        );
+        $this->googlePayPaymentsApi = new GooglePayPaymentsApi(
             new \GuzzleHttp\Client(),
             $configuration
         );
@@ -366,5 +374,107 @@ class Client
         } else {
             return $response;
         }
+    }
+
+    public function createGooglePayPayment(
+        string $tokenData,
+        string $orderNumber,
+        ?string $holderName = null,
+        ?string $fullName = null,
+        ?string $street1 = null,
+        ?string $street2 = null,
+        ?string $city = null,
+        ?string $region = null,
+        ?string $postalCode = null,
+        ?string $countryCode = null,
+        ?string $email = null,
+        ?string $phone = null,
+        ?array $customFields = null
+    ): GooglePayPayment|FailureWrapper
+    {
+        $cardData = [];
+
+        if ($holderName) {
+            $cardData['holder_name'] = $holderName;
+        }
+
+        // Build BillTo contact
+        if ($fullName || $street1 || $city || $postalCode || $countryCode) {
+            $billToData = [];
+            if ($fullName) $billToData['full_name'] = $fullName;
+            if ($street1) $billToData['street1'] = $street1;
+            if ($street2) $billToData['street2'] = $street2;
+            if ($city) $billToData['city'] = $city;
+            if ($region) $billToData['region'] = $region;
+            if ($postalCode) $billToData['postal_code'] = $postalCode;
+            if ($countryCode) $billToData['country_code'] = $countryCode;
+            if ($email) $billToData['email'] = $email;
+            if ($phone) $billToData['primary_phone'] = $phone;
+
+            $cardData['bill_to'] = new Contact($billToData);
+        }
+
+        $googlePayInput = new GooglePayPaymentInput([
+            'token' => $tokenData,
+            'custom_reference' => $orderNumber,
+        ]);
+
+        if (!empty($cardData)) {
+            $googlePayInput->setCard(new \Gear4music\ElavonPlayground\V1\EPG\Model\Card($cardData));
+        }
+
+        if ($customFields) {
+            $googlePayInput->setCustomFields($customFields);
+        }
+
+        $response = $this->googlePayPaymentsApi->createGooglePayPayment(
+            self::ACCEPT_JSON,
+            self::API_VERSION,
+            self::ACCEPT_JSON,
+            $googlePayInput
+        );
+
+        if ($response instanceof FailureWrapper) {
+            throw new \Exception(
+                sprintf(
+                    "Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        return $response;
+    }
+
+    /**
+     * Retrieve a Google Pay payment by ID
+     *
+     * @param string $paymentId The Google Pay payment ID
+     * @return GooglePayPayment
+     * @throws ApiException
+     * @throws \Exception
+     */
+    public function getGooglePayPayment(string $paymentId): GooglePayPayment
+    {
+        $response = $this->googlePayPaymentsApi->retrieveGooglePayPayment(
+            $paymentId,
+            self::ACCEPT_JSON,
+            self::API_VERSION
+        );
+
+        if ($response instanceof FailureWrapper) {
+            throw new \Exception(
+                sprintf(
+                    "Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        return $response;
     }
 }

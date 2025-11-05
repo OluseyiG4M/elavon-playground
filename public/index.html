@@ -25,12 +25,26 @@
         padding: 5px;
         margin-bottom: 10px;
     }
+
+    #google-pay-button {
+        margin-top: 10px;
+    }
 </style>
 
 <script src="https://uat.hpp.converge.eu.elavonaws.com/client/library.js"></script>
+<script async src="https://pay.google.com/gp/p/js/pay.js" onload="onGooglePayLoaded()"></script>
 
 <script>
     const MessageTypes = window.ElavonLightbox.MessageTypes;
+
+    let paymentsClient = null;
+    let googlePayConfig = {
+        environment: 'TEST',
+        merchantInfo: {
+            merchantName: 'Example Merchant',
+            merchantId: '24ktxxdw8jpbjkcc3mb79jqxhbwk'
+        }
+    };
 
     const submitData = async (data) => {
         // send data to your server
@@ -137,6 +151,160 @@
         const responseJson = await response.json(); //extract JSON from the http response
         document.getElementById('result').innerHTML = JSON.stringify(responseJson, null, 4);
     }
+
+    function onGooglePayLoaded() {
+        paymentsClient = new google.payments.api.PaymentsClient({
+            environment: googlePayConfig.environment
+        });
+        console.log('Google Pay loaded successfully');
+    }
+
+    function getGooglePaymentDataRequest(amount, currencyCode) {
+        const baseRequest = {
+            apiVersion: 2,
+            apiVersionMinor: 0
+        };
+
+        const tokenizationSpecification = {
+            type: 'PAYMENT_GATEWAY',
+            parameters: {
+                gateway: 'convergepay',
+                gatewayMerchantId: googlePayConfig.merchantInfo.merchantId
+            }
+        };
+
+        const cardPaymentMethod = {
+            type: 'CARD',
+            parameters: {
+                allowedAuthMethods: ['PAN_ONLY', 'CRYPTOGRAM_3DS'],
+                allowedCardNetworks: ['MASTERCARD', 'VISA']
+            },
+            tokenizationSpecification: tokenizationSpecification
+        };
+
+        return Object.assign({}, baseRequest, {
+            allowedPaymentMethods: [cardPaymentMethod],
+            transactionInfo: {
+                totalPriceStatus: 'FINAL',
+                totalPrice: amount.toString(),
+                currencyCode: currencyCode,
+                countryCode: 'GB'
+            },
+            merchantInfo: googlePayConfig.merchantInfo
+        });
+    }
+
+    async function checkGooglePayAvailability() {
+        try {
+            const isReadyToPayRequest = {
+                apiVersion: 2,
+                apiVersionMinor: 0,
+                allowedPaymentMethods: [{
+                    type: 'CARD',
+                    parameters: {
+                        allowedAuthMethods: ['PAN_ONLY', 'CRYPTOGRAM_3DS'],
+                        allowedCardNetworks: ['AMEX', 'MASTERCARD', 'VISA']
+                    }
+                }]
+            };
+
+            const response = await paymentsClient.isReadyToPay(isReadyToPayRequest);
+            if (response.result) {
+                console.log('Google Pay is available');
+                document.getElementById('google-pay-button').style.display = 'block';
+            } else {
+                console.log('Google Pay is not available');
+                document.getElementById('result').innerHTML = 'Google Pay is not available on this device/browser';
+            }
+        } catch (err) {
+            console.error('Error checking Google Pay availability:', err);
+            document.getElementById('result').innerHTML = 'Error checking Google Pay: ' + err.message;
+        }
+    }
+
+    async function initiateGooglePayPayment() {
+        const amount = parseFloat(document.getElementById('googlepay-amount').value);
+        const orderNumber = document.getElementById('googlepay-order-number').value;
+        const currencyCode = document.getElementById('googlepay-currency-code').value || 'GBP';
+
+        if (!amount || !orderNumber) {
+            alert('Please enter amount and order number');
+            return;
+        }
+
+        try {
+            document.getElementById('result').innerHTML = 'Initiating Google Pay...';
+
+            const paymentDataRequest = getGooglePaymentDataRequest(amount, currencyCode);
+            console.log('Payment Request Data', paymentDataRequest);
+            const paymentData = await paymentsClient.loadPaymentData(paymentDataRequest);
+
+            console.log('Payment data received:', paymentData);
+
+            await processGooglePayPayment(paymentData, amount, orderNumber, currencyCode);
+
+        } catch (err) {
+            console.error('Google Pay error:', err);
+            if (err.statusCode === 'CANCELED') {
+                document.getElementById('result').innerHTML = 'Payment cancelled by user';
+            } else {
+                document.getElementById('result').innerHTML = 'Error: ' + JSON.stringify(err, null, 4);
+            }
+        }
+    }
+
+    async function processGooglePayPayment(paymentData, amount, orderNumber, currencyCode) {
+        try {
+            const response = await fetch('http://localhost:8080/v1/create-googlepay-payment-epg', {
+                method: 'POST',
+                body: JSON.stringify({
+                    payment_data: paymentData,
+                    amount: amount,
+                    order_number: orderNumber,
+                    currency_code: currencyCode,
+                    email: document.getElementById('googlepay-email').value || 'customer@example.com'
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('result').innerHTML = '<div>Google Pay Payment Result:</div>' + JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error processing Google Pay payment:', err);
+            document.getElementById('result').innerHTML = 'Error processing payment: ' + err.message;
+        }
+    }
+
+    async function getGooglePayPayment() {
+        const paymentId = document.getElementById('googlepay-payment-id').value;
+
+        if (!paymentId) {
+            alert('Please enter a payment ID');
+            return;
+        }
+
+        try {
+            const response = await fetch('http://localhost:8080/v1/get-googlepay-payment-epg', {
+                method: 'POST',
+                body: JSON.stringify({
+                    payment_id: paymentId
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('result').innerHTML = JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error getting Google Pay payment:', err);
+            document.getElementById('result').innerHTML = 'Error: ' + err.message;
+        }
+    }
 </script>
 
 <body>
@@ -233,6 +401,45 @@
             </button>
         </div>
     </div>
+
+    <div class="rows">
+        <h2>Google Pay (EPG)</h2>
+        <div class="rows">
+            <h3>Create Payment</h3>
+            <label for="googlepay-amount">Amount</label>
+            <input id="googlepay-amount" type="text" value="" class="formItem" placeholder="10.00"/>
+
+            <label for="googlepay-order-number">Order Number</label>
+            <input id="googlepay-order-number" type="text" value="" class="formItem" placeholder="ORDER-123"/>
+
+            <label for="googlepay-currency-code">Currency Code</label>
+            <input id="googlepay-currency-code" type="text" value="GBP" class="formItem" placeholder="GBP"/>
+
+            <label for="googlepay-email">Customer Email</label>
+            <input id="googlepay-email" type="text" value="" class="formItem" placeholder="customer@example.com"/>
+
+            <button class="formItem" onclick="checkGooglePayAvailability()">
+                Check Google Pay Availability
+            </button>
+
+            <div id="google-pay-button" style="display: none;">
+                <button class="formItem" onclick="initiateGooglePayPayment()">
+                    Pay with Google Pay
+                </button>
+            </div>
+        </div>
+
+        <div class="rows">
+            <h3>Get Payment</h3>
+            <label for="googlepay-payment-id">Payment ID</label>
+            <input id="googlepay-payment-id" type="text" value="" class="formItem"/>
+
+            <button class="formItem" onclick="getGooglePayPayment()">
+                Get Google Pay Payment
+            </button>
+        </div>
+    </div>
+
     <div class="rows">
         <div>
             <h2>Result</h2>

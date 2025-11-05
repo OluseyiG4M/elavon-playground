@@ -272,6 +272,17 @@ class ObjectSerializer
             return null;
         }
 
+        // Auto-prefix namespace for Model classes if not already prefixed
+        if ($class &&
+            $class[0] !== '\\' &&
+            !in_array($class, ['DateTime', 'array', 'bool', 'boolean', 'byte', 'double', 'float', 'int', 'integer', 'mixed', 'number', 'object', 'string', 'void'], true) &&
+            strpos($class, '\\') === false &&
+            !preg_match('/^(array<|map\[)/', $class) &&
+            strcasecmp(substr($class, -2), '[]') !== 0) {
+            $class = '\\Gear4music\\ElavonPlayground\\V1\\EPG\\Model\\' . $class;
+        }
+
+
         if (strcasecmp(substr($class, -2), '[]') === 0) {
             $data = is_string($data) ? json_decode($data) : $data;
 
