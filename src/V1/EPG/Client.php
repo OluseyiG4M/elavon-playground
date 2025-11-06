@@ -391,7 +391,6 @@ class Client
      * @param string $countryCode ISO3
      * @param string $email
      * @param string $phone
-     * @param bool $enableGooglePay Whether to enable Google Pay as a payment method
      * @return PaymentSession
      * @throws ApiException
      * @throws \Exception
