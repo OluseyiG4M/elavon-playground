@@ -20,6 +20,7 @@ use Gear4music\ElavonPlayground\V1\EPG\Model\OrderInput;
 use Gear4music\ElavonPlayground\V1\EPG\Model\OrderItem;
 use Gear4music\ElavonPlayground\V1\EPG\Model\OrderItemType;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentMethod;
+use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentMethodOrigin;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentSession;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentSessionInput;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PositiveAmountAndCurrency;
@@ -376,62 +377,71 @@ class Client
         }
     }
 
-    public function createGooglePayPayment(
-        string $tokenData,
-        string $orderNumber,
-        ?string $holderName = null,
-        ?string $fullName = null,
-        ?string $street1 = null,
-        ?string $street2 = null,
-        ?string $city = null,
-        ?string $region = null,
-        ?string $postalCode = null,
-        ?string $countryCode = null,
-        ?string $email = null,
-        ?string $phone = null,
-        ?array $customFields = null
-    ): GooglePayPayment|FailureWrapper
+    /**
+     * Create a payment session with Google Pay enabled (similar to Blik)
+     *
+     * @param string $orderHref Order href returned by createOrder endpoint
+     * @param string $account Account ID
+     * @param string $originUrl Top level URL from which the payment session was initiated
+     * @param string $name Billing Address
+     * @param string $address1
+     * @param string $address2
+     * @param string $city
+     * @param string $postCode
+     * @param string $countryCode ISO3
+     * @param string $email
+     * @param string $phone
+     * @param bool $enableGooglePay Whether to enable Google Pay as a payment method
+     * @return PaymentSession
+     * @throws ApiException
+     * @throws \Exception
+     */
+    public function createPaymentSessionWithGooglePay(
+        string $orderHref,
+        string $account,
+        string $originUrl,
+        string $name,
+        string $address1,
+        string $address2,
+        string $city,
+        string $postCode,
+        string $countryCode,
+        string $email,
+        string $phone,
+    ): PaymentSession
     {
-        $cardData = [];
-
-        if ($holderName) {
-            $cardData['holder_name'] = $holderName;
-        }
-
-        // Build BillTo contact
-        if ($fullName || $street1 || $city || $postalCode || $countryCode) {
-            $billToData = [];
-            if ($fullName) $billToData['full_name'] = $fullName;
-            if ($street1) $billToData['street1'] = $street1;
-            if ($street2) $billToData['street2'] = $street2;
-            if ($city) $billToData['city'] = $city;
-            if ($region) $billToData['region'] = $region;
-            if ($postalCode) $billToData['postal_code'] = $postalCode;
-            if ($countryCode) $billToData['country_code'] = $countryCode;
-            if ($email) $billToData['email'] = $email;
-            if ($phone) $billToData['primary_phone'] = $phone;
-
-            $cardData['bill_to'] = new Contact($billToData);
-        }
-
-        $googlePayInput = new GooglePayPaymentInput([
-            'token' => $tokenData,
-            'custom_reference' => $orderNumber,
+        $billTo = new Contact([
+            'full_name' => $name,
+            'street1' => $address1,
+            'street2' => $address2,
+            'city' => $city,
+            'postal_code' => $postCode,
+            'country_code' => $countryCode,
+            'primary_phone' => $phone,
+            'email' => $email,
         ]);
 
-        if (!empty($cardData)) {
-            $googlePayInput->setCard(new \Gear4music\ElavonPlayground\V1\EPG\Model\Card($cardData));
-        }
+        // Configure allowed payment methods
+        $allowedPaymentMethods = [PaymentMethod::CARD];
+        $allowedPaymentMethodOrigins = [PaymentMethodOrigin::GOOGLE_PAY];
 
-        if ($customFields) {
-            $googlePayInput->setCustomFields($customFields);
-        }
+        $paymentSessionInput = new PaymentSessionInput([
+            'order' => $orderHref,
+            'account' => $this->host . '/accounts/' . $account,
+            'origin_url' => $originUrl,
+            'do_create_transaction' => true,
+            'bill_to' => $billTo,
+            'allowed_payment_methods' => $allowedPaymentMethods,
+            'allowed_payment_method_origins' => $allowedPaymentMethodOrigins,
+            'hpp_type' => HppType::LIGHTBOX,
+            'shopper_email_address' => $email,
+        ]);
 
-        $response = $this->googlePayPaymentsApi->createGooglePayPayment(
+        $response = $this->paymentSessionsApi->createPaymentSession(
             self::ACCEPT_JSON,
             self::API_VERSION,
             self::ACCEPT_JSON,
-            $googlePayInput
+            $paymentSessionInput
         );
 
         if ($response instanceof FailureWrapper) {
