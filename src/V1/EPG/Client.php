@@ -486,4 +486,229 @@ class Client
 
         return $response;
     }
+
+    /**
+     * Process Google Pay payment directly using token from Google Pay API
+     * This is for Route 3: Direct Google Pay API integration with dynamic pricing
+     *
+     * @param string $paymentToken Encrypted Google Pay token
+     * @param float $amount Final transaction amount
+     * @param string $currencyCode Currency code (e.g., 'GBP')
+     * @param string $orderNumber Order reference
+     * @param string $email Customer email
+     * @param array $paymentData Full payment data from Google Pay
+     * @return Transaction|FailureWrapper
+     * @throws \Exception
+     */
+    public function processGooglePayDirect(
+        string $paymentToken,
+        float $amount,
+        string $currencyCode,
+        string $orderNumber,
+        string $email,
+        array $paymentData = []
+    ): Transaction|FailureWrapper
+    {
+        // Extract billing info from Google Pay data if available
+        $billTo = null;
+
+        $paymentMethodData = isset($paymentData['paymentMethodData'])
+            ? $paymentData['paymentMethodData']
+            : null;
+
+        if ($paymentMethodData && isset($paymentMethodData['info'])) {
+            $info = $paymentMethodData['info'];
+
+            if (isset($info['billingAddress'])) {
+                $billingAddress = $info['billingAddress'];
+
+                $billTo = new Contact([
+                    'full_name' => $billingAddress['name'] ?? 'Customer',
+                    'street1' => $billingAddress['address1'] ?? '',
+                    'street2' => $billingAddress['address2'] ?? null,
+                    'city' => $billingAddress['locality'] ?? '',
+                    'region' => $billingAddress['administrativeArea'] ?? null,
+                    'postal_code' => $billingAddress['postalCode'] ?? '',
+                    'country_code' => $this->convertCountryCode($billingAddress['countryCode'] ?? 'GB'),
+                    'email' => $email,
+                ]);
+            }
+        }
+
+        // Step 1: Create GooglePayPaymentInput with the token
+        $googlePayInput = new GooglePayPaymentInput([
+            'token' => $paymentToken,
+            'custom_reference' => $orderNumber,
+        ]);
+
+        if ($billTo) {
+            $googlePayInput->setCard(new \Gear4music\ElavonPlayground\V1\EPG\Model\Card([
+                'bill_to' => $billTo
+            ]));
+        }
+
+        try {
+            // Log the request details
+            $googlePayRequestLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /google-pay-payments',
+                'full_url' => $this->googlePayPaymentsApi->getConfig()->getHost() . '/google-pay-payments',
+                'headers' => [
+                    'Accept' => self::ACCEPT_JSON,
+                    'Accept-Version' => self::API_VERSION,
+                    'Content-Type' => self::ACCEPT_JSON,
+                    'Authorization' => 'Basic ' . base64_encode(
+                            $this->googlePayPaymentsApi->getConfig()->getUsername() . ':***'
+                        ),
+                ],
+                'request_body' => json_decode(json_encode($googlePayInput), true),
+            ];
+
+            $this->logElavonRequest('Google Pay Payment Request', $googlePayRequestLog);
+
+            $googlePayPayment = $this->googlePayPaymentsApi->createGooglePayPayment(
+                self::ACCEPT_JSON,
+                self::API_VERSION,
+                self::ACCEPT_JSON,
+                $googlePayInput
+            );
+
+            $googlePayResponseLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /google-pay-payments',
+                'status' => 'success',
+                'response_body' => json_decode(json_encode($googlePayPayment), true),
+            ];
+
+            $this->logElavonRequest('Google Pay Payment Response', $googlePayResponseLog);
+
+        } catch (\Exception $e) {
+            $this->logElavonRequest('Google Pay Payment Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /google-pay-payments',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+
+        if ($googlePayPayment instanceof FailureWrapper) {
+            throw new \Exception(
+                sprintf(
+                    "Google Pay Payment Error: Code: %s, Desc: %s",
+                    $googlePayPayment->getFailures()[0]->getCode(),
+                    $googlePayPayment->getFailures()[0]->getDescription(),
+                ),
+                $googlePayPayment->getStatus()
+            );
+        }
+
+        // Step 3: Create a transaction using the Google Pay payment
+        $transaction = new SaleTransaction([
+            'type' => TransactionType::SALE,
+            'total' => new PositiveAmountAndCurrency([
+                'amount' => $amount,
+                'currency_code' => $currencyCode,
+            ]),
+            'order_reference' => $orderNumber,
+            'shopper_interaction' => ShopperInteraction::ECOMMERCE,
+            'shopper_email_address' => $email,
+            'google_pay_payment' => $googlePayPayment->getHref(), // Reference the GooglePayPayment
+            'do_capture' => true,
+            'do_send_receipt' => true
+        ]);
+
+        $transaction->setType(TransactionType::SALE);
+
+        try {
+            // Log the request details
+            $transactionRequestLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'full_url' => $this->transactionsApi->getConfig()->getHost() . '/transactions',
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'Accept-Version' => self::API_VERSION,
+                    'Content-Type' => 'application/json',
+                    'Authorization' => 'Basic ' . base64_encode(
+                            $this->transactionsApi->getConfig()->getUsername() . ':***'
+                        ),
+                ],
+                'request_body' => json_decode(json_encode($transaction), true),
+            ];
+
+            $this->logElavonRequest('Transaction Request', $transactionRequestLog);
+
+            $transactionResult = $this->transactionsApi->createTransaction($transaction);
+
+            $transactionResponseLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'status' => 'success',
+                'response_body' => json_decode(json_encode($transactionResult), true),
+            ];
+
+            $this->logElavonRequest('Transaction Response', $transactionResponseLog);
+
+        } catch (\Exception $e) {
+            $this->logElavonRequest('Transaction Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+
+        if ($transactionResult instanceof FailureWrapper) {
+            throw new \Exception(
+                sprintf(
+                    "Transaction Error: Code: %s, Desc: %s",
+                    $transactionResult->getFailures()[0]->getCode(),
+                    $transactionResult->getFailures()[0]->getDescription(),
+                ),
+                $transactionResult->getStatus()
+            );
+        }
+
+        return $transactionResult;
+    }
+
+    private function logElavonRequest(string $title, array $data): void
+    {
+        $logDir = __DIR__ . '/../../logs';
+
+
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+
+        $logFile = $logDir . '/elavon_' . date('Y-m-d') . '.log';
+
+        $logEntry = sprintf(
+            "\n[%s] %s\n%s\n%s\n",
+            date('Y-m-d H:i:s'),
+            $title,
+            str_repeat('=', 80),
+            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+        );
+
+        file_put_contents($logFile, $logEntry, FILE_APPEND);
+    }
+
+    private function convertCountryCode(string $iso2): string
+    {
+        $countryMap = [
+            'GB' => 'GBR',
+            'US' => 'USA',
+            'DE' => 'DEU',
+            'FR' => 'FRA',
+            'IT' => 'ITA',
+            'ES' => 'ESP',
+            'NL' => 'NLD',
+            'PL' => 'POL',
+        ];
+
+        return $countryMap[$iso2] ?? $iso2;
+    }
 }

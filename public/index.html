@@ -20,20 +20,142 @@
         padding: 20px;
         align-content: center;
     }
-    
+
     .formItem {
         padding: 5px;
         margin-bottom: 10px;
     }
+
+    /* Dynamic Pricing Styles */
+    .poc-container {
+        border: 3px solid #4285f4;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 20px 0;
+        background: #f8f9fa;
+    }
+
+    .poc-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        padding: 10px;
+        background: #4285f4;
+        color: white;
+        border-radius: 4px;
+        margin-bottom: 15px;
+    }
+
+    .poc-header:hover {
+        background: #357ae8;
+    }
+
+    .poc-content {
+        display: none;
+    }
+
+    .poc-content.active {
+        display: block;
+    }
+
+    .product-item {
+        padding: 10px;
+        margin: 5px 0;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: white;
+    }
+
+    .price-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    .price-row.total {
+        font-weight: bold;
+        font-size: 1.1em;
+        border-top: 2px solid #333;
+        border-bottom: none;
+        margin-top: 5px;
+        padding-top: 5px;
+    }
+
+    .shipping-option {
+        padding: 8px;
+        margin: 3px 0;
+        border: 2px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: white;
+    }
+
+    .shipping-option:hover {
+        background: #f0f0f0;
+    }
+
+    .shipping-option.selected {
+        border-color: #4285f4;
+        background: #e8f0fe;
+    }
+
+    .order-summary {
+        background: white;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+    }
+
+    #googlepay-button-dynamic {
+        margin: 15px 0;
+        min-height: 50px;
+    }
+
+    .status-message {
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .status-success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
+    .status-error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+
+    .status-info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+    }
+
+    .toggle-icon {
+        font-size: 24px;
+        transition: transform 0.3s;
+    }
+
+    .toggle-icon.active {
+        transform: rotate(180deg);
+    }
 </style>
 
 <script src="https://uat.hpp.converge.eu.elavonaws.com/client/library.js"></script>
+<script async src="https://pay.google.com/gp/p/js/pay.js" onload="onGooglePayLoaded()"></script>
 
 <script>
     const MessageTypes = window.ElavonLightbox.MessageTypes;
 
     const submitData = async (data) => {
-        // send data to your server
         console.log(data);
         const response = await fetch('http://localhost:8080/v1/get-epg-transaction', {
             method: 'POST',
@@ -100,7 +222,7 @@
                 'Content-Type': 'application/json'
             }
         });
-        const responseJson = await response.json(); //extract JSON from the http response
+        const responseJson = await response.json();
         document.getElementById('result').innerHTML = JSON.stringify(responseJson, null, 4);
     }
 
@@ -120,7 +242,7 @@
                 'Content-Type': 'application/json'
             }
         });
-        const responseJson = await response.json(); //extract JSON from the http response
+        const responseJson = await response.json();
         document.getElementById('result').innerHTML = JSON.stringify(responseJson, null, 4);
     }
 
@@ -134,11 +256,10 @@
                 'Content-Type': 'application/json'
             }
         });
-        const responseJson = await response.json(); //extract JSON from the http response
+        const responseJson = await response.json();
         document.getElementById('result').innerHTML = JSON.stringify(responseJson, null, 4);
     }
 
-    // Google Pay via Elavon Lightbox
     const createGooglePaySession = async () => {
         const amount = parseFloat(document.getElementById('googlepay-amount').value);
         const orderNumber = document.getElementById('googlepay-order-number').value;
@@ -178,7 +299,6 @@
                 '<div>Session details:</div>' +
                 JSON.stringify(responseJson, null, 4);
 
-            // Initialize the Elavon Lightbox with the session ID
             const sessionId = responseJson.session.id;
             let lightbox;
 
@@ -211,8 +331,6 @@
     };
 
     const getGooglePayTransaction = async () => {
-        console.log('getGooglePayTransaction called'); // Debug log
-
         const transactionId = document.getElementById('googlepay-transaction-id').value;
         const sessionId = document.getElementById('googlepay-session-id').value;
 
@@ -229,12 +347,480 @@
             document.getElementById('result').innerHTML = 'Error: ' + err.message;
         }
     };
+
+    // ============= DYNAMIC PRICING POC (Route 3) =============
+
+    const dynamicPricing = {
+        basePrice: 820.00,
+        taxRate: 0.20,
+        selectedShipping: 'standard-free',
+        shippingOptions: {
+            'standard-free': { cost: 0.00, label: 'Free Standard Shipping', description: '5-7 business days' },
+            'standard-paid': { cost: 5.99, label: 'Express Shipping', description: '3 business days' },
+            'express': { cost: 15.99, label: 'Next Day Delivery', description: 'Order before 2pm' }
+        },
+        paymentsClient: null,
+
+        calculatePricing() {
+            const shipping = this.shippingOptions[this.selectedShipping].cost;
+            const subtotal = this.basePrice;
+            const subtotalWithShipping = subtotal + shipping;
+            const tax = subtotalWithShipping * this.taxRate;
+            const total = subtotalWithShipping + tax;
+
+            return {
+                subtotal: subtotal.toFixed(2),
+                shipping: shipping.toFixed(2),
+                tax: tax.toFixed(2),
+                total: total.toFixed(2)
+            };
+        },
+
+        updatePricingUI() {
+            const pricing = this.calculatePricing();
+            document.getElementById('dynamic-subtotal').textContent = `£${pricing.subtotal}`;
+            document.getElementById('dynamic-shipping').textContent = `£${pricing.shipping}`;
+            document.getElementById('dynamic-tax').textContent = `£${pricing.tax}`;
+            document.getElementById('dynamic-total').textContent = `£${pricing.total}`;
+        },
+
+        selectShipping(shippingId) {
+            this.selectedShipping = shippingId;
+
+            document.querySelectorAll('.shipping-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+            document.getElementById(`shipping-${shippingId}`).classList.add('selected');
+
+            this.updatePricingUI();
+            this.showStatus('Shipping updated. New price will be reflected in Google Pay.', 'info');
+        },
+
+        getGoogleTransactionInfo() {
+            const pricing = this.calculatePricing();
+
+            return {
+                displayItems: [
+                    {
+                        label: "Subtotal",
+                        type: "SUBTOTAL",
+                        price: pricing.subtotal,
+                    },
+                    {
+                        label: this.shippingOptions[this.selectedShipping].label,
+                        type: "LINE_ITEM",
+                        price: pricing.shipping,
+                    },
+                    {
+                        label: "Tax (20% VAT)",
+                        type: "TAX",
+                        price: pricing.tax,
+                    }
+                ],
+                countryCode: 'GB',
+                currencyCode: "GBP",
+                totalPriceStatus: "FINAL",
+                totalPrice: pricing.total,
+                totalPriceLabel: "Total"
+            };
+        },
+
+        getGoogleShippingOptions() {
+            return {
+                defaultSelectedOptionId: this.selectedShipping,
+                shippingOptions: Object.keys(this.shippingOptions).map(key => ({
+                    id: key,
+                    label: `${this.shippingOptions[key].label} - £${this.shippingOptions[key].cost.toFixed(2)}`,
+                    description: this.shippingOptions[key].description
+                }))
+            };
+        },
+
+        showStatus(message, type) {
+            const container = document.getElementById('dynamic-status');
+            container.className = `status-message status-${type}`;
+            container.textContent = message;
+            container.style.display = 'block';
+
+            setTimeout(() => {
+                container.style.display = 'none';
+            }, 5000);
+        }
+    };
+
+    let googlePayClient = null;
+
+    function onGooglePayLoaded() {
+        console.log('Google Pay SDK loaded');
+    }
+
+    function getGooglePaymentsClient() {
+        if (googlePayClient === null) {
+            googlePayClient = new google.payments.api.PaymentsClient({
+                environment: "TEST",
+                merchantInfo: {
+                    merchantName: "Gear4music",
+                    merchantId: "01234567890123456789" // Test Merchant ID
+                },
+                paymentDataCallbacks: {
+                    onPaymentAuthorized: onPaymentAuthorizedDynamic,
+                    onPaymentDataChanged: onPaymentDataChangedDynamic
+                }
+            });
+        }
+        return googlePayClient;
+    }
+
+    function onPaymentDataChangedDynamic(intermediatePaymentData) {
+        return new Promise(function(resolve) {
+            let shippingAddress = intermediatePaymentData.shippingAddress;
+            let shippingOptionData = intermediatePaymentData.shippingOptionData;
+            let paymentDataRequestUpdate = {};
+
+            console.log('Payment data changed:', intermediatePaymentData);
+
+            if (intermediatePaymentData.callbackTrigger === "INITIALIZE" || intermediatePaymentData.callbackTrigger === "SHIPPING_ADDRESS") {
+                // Check if shipping address is serviceable
+                if (shippingAddress && shippingAddress.administrativeArea === "NJ") {
+                    // Example: Block shipping to New Jersey
+                    paymentDataRequestUpdate.error = getGoogleUnserviceableAddressError();
+                } else {
+                    // Provide shipping options
+                    paymentDataRequestUpdate.newShippingOptionParameters = dynamicPricing.getGoogleShippingOptions();
+                    let selectedShippingOptionId = paymentDataRequestUpdate.newShippingOptionParameters.defaultSelectedOptionId;
+                    dynamicPricing.selectedShipping = selectedShippingOptionId;
+                    dynamicPricing.updatePricingUI();
+                    paymentDataRequestUpdate.newTransactionInfo = dynamicPricing.getGoogleTransactionInfo();
+                }
+            }
+            else if (intermediatePaymentData.callbackTrigger === "SHIPPING_OPTION") {
+                // Update pricing when shipping option changes
+                dynamicPricing.selectedShipping = shippingOptionData.id;
+                dynamicPricing.updatePricingUI();
+                paymentDataRequestUpdate.newTransactionInfo = dynamicPricing.getGoogleTransactionInfo();
+            }
+
+            resolve(paymentDataRequestUpdate);
+        });
+    }
+
+    function onPaymentAuthorizedDynamic(paymentData) {
+        return new Promise(function(resolve) {
+            dynamicPricing.showStatus('Processing payment...', 'info');
+
+            processPaymentDynamic(paymentData)
+                .then(function() {
+                    dynamicPricing.showStatus('Payment successful!', 'success');
+                    resolve({ transactionState: 'SUCCESS' });
+                })
+                .catch(function(error) {
+                    dynamicPricing.showStatus('Payment failed: ' + error.message, 'error');
+                    resolve({
+                        transactionState: 'ERROR',
+                        error: {
+                            intent: 'PAYMENT_AUTHORIZATION',
+                            message: error.message || 'Payment failed',
+                            reason: 'PAYMENT_DATA_INVALID'
+                        }
+                    });
+                });
+        });
+    }
+
+    async function processPaymentDynamic(paymentData) {
+        try {
+            const pricing = dynamicPricing.calculatePricing();
+
+            // Extract shipping address from Google Pay data
+            const shippingAddress = paymentData.shippingAddress || {};
+
+            console.log('Processing payment with data:', paymentData);
+
+            document.getElementById('result').textContent =
+                'Payment Data Received (Dynamic):\n\n' +
+                JSON.stringify(paymentData, null, 2);
+
+            const requestPayload = {
+                payment_data: paymentData,
+                amount: pricing.total,
+                currency_code: 'GBP',
+                order_number: 'DYNAMIC-' + Date.now(),
+                email: paymentData.email || 'customer@example.com',
+                shipping_option: dynamicPricing.selectedShipping,
+                shipping_address: {
+                    name: shippingAddress.name || '',
+                    address1: shippingAddress.address1 || '',
+                    address2: shippingAddress.address2 || '',
+                    locality: shippingAddress.locality || '',
+                    administrative_area: shippingAddress.administrativeArea || '',
+                    postal_code: shippingAddress.postalCode || '',
+                    country_code: shippingAddress.countryCode || 'GB',
+                    phone: shippingAddress.phoneNumber || ''
+                }
+            };
+
+            console.log('Sending request to backend:', requestPayload);
+
+            const response = await fetch('http://localhost:8080/v1/process-googlepay-direct', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestPayload)
+            });
+
+            const result = await response.json();
+
+            console.log('Backend response:', result);
+
+            document.getElementById('result').textContent =
+                'Transaction Result:\n\n' +
+                JSON.stringify(result, null, 2);
+
+            if (!result.success) {
+                // Show detailed error information
+                let errorMessage = result.error || 'Payment failed';
+
+                if (result.error_message) {
+                    errorMessage += '\n\nDetails: ' + result.error_message;
+                }
+
+                if (result.details) {
+                    errorMessage += '\n\nAPI Details: ' + JSON.stringify(result.details, null, 2);
+                }
+
+                if (result.trace) {
+                    console.error('Error trace:', result.trace);
+                }
+
+                throw new Error(errorMessage);
+            }
+
+            return result;
+
+        } catch (error) {
+            console.error('Payment processing error:', error);
+
+            document.getElementById('result').textContent =
+                'Error Processing Payment:\n\n' +
+                error.message +
+                '\n\nCheck browser console for full details.';
+
+            throw error;
+        }
+    }
+
+    function initializeGooglePayDynamic() {
+        const client = getGooglePaymentsClient();
+
+        const baseRequest = {
+            apiVersion: 2,
+            apiVersionMinor: 0
+        };
+
+        const baseCardPaymentMethod = {
+            type: 'CARD',
+            parameters: {
+                allowedAuthMethods: ["PAN_ONLY", "CRYPTOGRAM_3DS"],
+                allowedCardNetworks: ["AMEX", "DISCOVER", "MASTERCARD", "VISA"]
+            }
+        };
+
+        client.isReadyToPay(Object.assign({}, baseRequest, {
+            allowedPaymentMethods: [baseCardPaymentMethod]
+        }))
+            .then(function(response) {
+                if (response.result) {
+                    addGooglePayButtonDynamic();
+                    dynamicPricing.showStatus('Google Pay is ready', 'success');
+                } else {
+                    dynamicPricing.showStatus('Google Pay not available', 'error');
+                }
+            })
+            .catch(function(err) {
+                console.error('Error:', err);
+                dynamicPricing.showStatus('Error: ' + err.message, 'error');
+            });
+    }
+
+    function addGooglePayButtonDynamic() {
+        const client = getGooglePaymentsClient();
+        const container = document.getElementById('googlepay-button-dynamic');
+
+        const allowedPaymentMethods = [{
+            type: 'CARD',
+            parameters: {
+                allowedAuthMethods: ["PAN_ONLY", "CRYPTOGRAM_3DS"],
+                allowedCardNetworks: ["AMEX", "DISCOVER", "MASTERCARD", "VISA"]
+            },
+            tokenizationSpecification: {
+                type: 'PAYMENT_GATEWAY',
+                parameters: {
+                    gateway: 'convergepay',
+                    gatewayMerchantId: '24ktxxdw8jpbjkcc3mb79jqxhbwk'
+                }
+            }
+        }];
+
+        const button = client.createButton({
+            buttonColor: 'default',
+            buttonType: 'pay',
+            buttonRadius: 10,
+            buttonBorderType: 'no_border',
+            buttonSizeMode: 'fill',
+            buttonLocale: 'en',
+            onClick: onGooglePayButtonClickedDynamic,
+            allowedPaymentMethods: allowedPaymentMethods
+        });
+
+        container.appendChild(button);
+    }
+
+    function onGooglePayButtonClickedDynamic() {
+        const client = getGooglePaymentsClient();
+
+        const paymentDataRequest = {
+            apiVersion: 2,
+            apiVersionMinor: 0,
+            allowedPaymentMethods: [{
+                type: 'CARD',
+                parameters: {
+                    allowedAuthMethods: ["PAN_ONLY", "CRYPTOGRAM_3DS"],
+                    allowedCardNetworks: ["AMEX", "DISCOVER", "MASTERCARD", "VISA"]
+                },
+                tokenizationSpecification: {
+                    type: 'PAYMENT_GATEWAY',
+                    parameters: {
+                        gateway: 'convergepay',
+                        gatewayMerchantId: '24ktxxdw8jpbjkcc3mb79jqxhbwk'
+                    }
+                }
+            }],
+            transactionInfo: dynamicPricing.getGoogleTransactionInfo(),
+            merchantInfo: {
+                merchantName: 'Gear4music',
+                merchantId: '01234567890123456789' // Test Merchant ID
+            },
+            callbackIntents: ["SHIPPING_ADDRESS", "SHIPPING_OPTION", "PAYMENT_AUTHORIZATION"],
+            shippingAddressRequired: true,
+            shippingAddressParameters: getGoogleShippingAddressParameters(),
+            shippingOptionRequired: true,
+            shippingOptionParameters: dynamicPricing.getGoogleShippingOptions()
+        };
+
+        dynamicPricing.showStatus('Opening Google Pay...', 'info');
+
+        console.log('PaymentData Request', paymentDataRequest);
+        client.loadPaymentData(paymentDataRequest)
+            .catch(function(err) {
+                if (err.statusCode !== 'CANCELED') {
+                    dynamicPricing.showStatus('Error: ' + err.message, 'error');
+                    console.error('Google Pay error:', err);
+                }
+            });
+    }
+
+    function getGoogleShippingAddressParameters() {
+        return {
+            allowedCountryCodes: ['GB', 'US', 'DE', 'FR', 'ES', 'IT', 'NL', 'PL'],
+            phoneNumberRequired: true
+        };
+    }
+
+    function getGoogleUnserviceableAddressError() {
+        return {
+            reason: "SHIPPING_ADDRESS_UNSERVICEABLE",
+            message: "Cannot ship to the selected address",
+            intent: "SHIPPING_ADDRESS"
+        };
+    }
+
+    function togglePOC() {
+        const content = document.getElementById('poc-content');
+        const icon = document.getElementById('toggle-icon');
+
+        if (content.classList.contains('active')) {
+            content.classList.remove('active');
+            icon.classList.remove('active');
+        } else {
+            content.classList.add('active');
+            icon.classList.add('active');
+            dynamicPricing.updatePricingUI();
+            initializeGooglePayDynamic();
+        }
+    }
 </script>
 
 <body>
 
 <h1>Elavon Playground</h1>
 
+<!-- Dynamic Pricing POC Section -->
+<div class="poc-container">
+    <div class="poc-header" onclick="togglePOC()">
+        <h2 style="margin: 0;">Route 2: Google Pay Dynamic Pricing POC (Click to Expand)</h2>
+        <span id="toggle-icon" class="toggle-icon">▼</span>
+    </div>
+
+    <div id="poc-content" class="poc-content">
+        <p><strong>Direct Google Pay API Integration with Real-time Dynamic Pricing</strong></p>
+
+        <div class="columns">
+            <div class="rows" style="flex: 1;">
+                <h3>Products</h3>
+                <div class="product-item">
+                    <strong>Guitar - Fender Stratocaster</strong><br>
+                    Quantity: 1 × £800.00
+                </div>
+                <div class="product-item">
+                    <strong>Drumsticks - Vic Firth 5A</strong><br>
+                    Quantity: 2 × £10.00
+                </div>
+
+                <h3>Shipping Options</h3>
+                <div id="shipping-standard-free" class="shipping-option selected" onclick="dynamicPricing.selectShipping('standard-free')">
+                    <strong>Free Standard Shipping - £0.00</strong><br>
+                    <small>5-7 business days</small>
+                </div>
+                <div id="shipping-standard-paid" class="shipping-option" onclick="dynamicPricing.selectShipping('standard-paid')">
+                    <strong>Express Shipping - £5.99</strong><br>
+                    <small>3 business days</small>
+                </div>
+                <div id="shipping-express" class="shipping-option" onclick="dynamicPricing.selectShipping('express')">
+                    <strong>Next Day Delivery - £15.99</strong><br>
+                    <small>Order before 2pm</small>
+                </div>
+
+                <div class="order-summary">
+                    <h3>Order Summary</h3>
+                    <div class="price-row">
+                        <span>Subtotal:</span>
+                        <span id="dynamic-subtotal">£820.00</span>
+                    </div>
+                    <div class="price-row">
+                        <span>Shipping:</span>
+                        <span id="dynamic-shipping">£0.00</span>
+                    </div>
+                    <div class="price-row">
+                        <span>Tax (20%):</span>
+                        <span id="dynamic-tax">£164.00</span>
+                    </div>
+                    <div class="price-row total">
+                        <span>Total:</span>
+                        <span id="dynamic-total">£984.00</span>
+                    </div>
+                </div>
+
+                <div id="googlepay-button-dynamic"></div>
+                <div id="dynamic-status" class="status-message" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- END Dynamic Pricing POC Section -->
+
+<!-- Original Implementations -->
 <div class="columns">
     <div class="rows">
         <h2>Blik (Elavon Payment Gateway)</h2>
@@ -327,7 +913,7 @@
     </div>
 
     <div class="rows">
-        <h2>Google Pay (EPG Lightbox)</h2>
+        <h2>Google Pay (EPG Lightbox - Route 1)</h2>
         <div class="rows">
             <h3>Create Payment</h3>
             <label for="googlepay-amount">Amount</label>
@@ -346,12 +932,10 @@
                 Create Google Pay Payment Session
             </button>
         </div>
-
         <div class="rows">
             <h3>Get Transaction</h3>
             <label for="googlepay-transaction-id">Transaction ID</label>
             <input id="googlepay-transaction-id" type="text" value="" class="formItem"/>
-
             <label for="googlepay-session-id">Session ID</label>
             <input id="googlepay-session-id" type="text" value="" class="formItem"/>
 
