@@ -678,22 +678,61 @@ class Client
     {
         $logDir = __DIR__ . '/../../logs';
 
-
         if (!is_dir($logDir)) {
             mkdir($logDir, 0755, true);
         }
 
         $logFile = $logDir . '/elavon_' . date('Y-m-d') . '.log';
 
+        // Sanitize sensitive data before logging
+        $sanitizedData = $this->sanitizeSensitiveData($data);
+
         $logEntry = sprintf(
             "\n[%s] %s\n%s\n%s\n",
             date('Y-m-d H:i:s'),
             $title,
             str_repeat('=', 80),
-            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            json_encode($sanitizedData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
         );
 
         file_put_contents($logFile, $logEntry, FILE_APPEND);
+    }
+
+    private function sanitizeSensitiveData(array $data): array
+    {
+        $sensitiveKeys = [
+            'token',
+            'password',
+            'secret',
+            'api_key',
+            'apiKey',
+            'authorization',
+            'Authorization',
+            'signature',
+            'signedMessage',
+            'signed_message',
+            'protocolVersion',
+            'intermediateSigningKey',
+            'card_number',
+            'cardNumber',
+            'cvv',
+            'cvc',
+            'pan',
+        ];
+
+        array_walk_recursive($data, function (&$value, $key) use ($sensitiveKeys) {
+            $keyLower = strtolower($key);
+            foreach ($sensitiveKeys as $sensitiveKey) {
+                if (stripos($keyLower, strtolower($sensitiveKey)) !== false) {
+                    if (is_string($value) && strlen($value) > 0) {
+                        $value = 'xxxxxxxxxxxxxx';
+                    }
+                    break;
+                }
+            }
+        });
+
+        return $data;
     }
 
     private function convertCountryCode(string $iso2): string

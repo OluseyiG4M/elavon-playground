@@ -1,0 +1,95 @@
+
+[2025-11-12 08:21:07] Google Pay Payment Request
+================================================================================
+{
+    "timestamp": "2025-11-12 08:21:07",
+    "endpoint": "POST /google-pay-payments",
+    "full_url": "https://uat.api.converge.eu.elavonaws.com/google-pay-payments",
+    "headers": {
+        "Accept": "application/json",
+        "Accept-Version": 1,
+        "Content-Type": "application/json",
+        "Authorization": "xxxxxxxxxxxxxx"
+    },
+    "request_body": {
+        "token": "xxxxxxxxxxxxxx",
+        "customReference": "DYNAMIC-1762935667077"
+    }
+}
+
+[2025-11-12 08:21:07] Google Pay Payment Response
+================================================================================
+{
+    "timestamp": "2025-11-12 08:21:07",
+    "endpoint": "POST /google-pay-payments",
+    "status": "success",
+    "response_body": {
+        "href": "https://uat.api.converge.eu.elavonaws.com/google-pay-payments/3wgbwr92frcfp4t63fh3fh6qvkgd",
+        "id": "3wgbwr92frcfp4t63fh3fh6qvkgd",
+        "createdAt": "2025-11-12T08:21:07+00:00",
+        "expiresAt": "2025-11-12T08:51:07+00:00",
+        "merchant": "https://uat.api.converge.eu.elavonaws.com/merchants/24ktxxdw8jpbjkcc3mb79jqxhbwk",
+        "processorAccount": "https://uat.api.converge.eu.elavonaws.com/processor-accounts/23c3vm8fymhrvy8b2f8wc3v8w7mh",
+        "card": {
+            "panFingerprint": "xxxxxxxxxxxxxx",
+            "expirationMonth": 12,
+            "expirationYear": 2027,
+            "maskedNumber": "XXXXXXXXXXXX1111",
+            "last4": "1111",
+            "bin": "411111",
+            "scheme": "Visa",
+            "brand": "Visa Credit",
+            "fundingSource": "credit",
+            "issuingBank": "Google Pay Test",
+            "issuingCountry": "USA",
+            "issuingCurrency": "USD",
+            "isDebit": "false",
+            "isCorporate": "false",
+            "isDccAllowed": "true"
+        },
+        "customReference": "DYNAMIC-1762935667077",
+        "verificationResults": {
+            "name": "unprovided",
+            "securityCode": "unprovided",
+            "addressStreet": "unprovided",
+            "addressPostalCode": "unprovided",
+            "threeDSecureV2": "unprovided",
+            "cryptogramSecurity": "unprovided"
+        }
+    }
+}
+
+[2025-11-12 08:21:07] Transaction Request
+================================================================================
+{
+    "timestamp": "2025-11-12 08:21:07",
+    "endpoint": "POST /transactions",
+    "full_url": "https://uat.api.converge.eu.elavonaws.com/transactions",
+    "headers": {
+        "Accept": "application/json",
+        "Accept-Version": 1,
+        "Content-Type": "application/json",
+        "Authorization": "xxxxxxxxxxxxxx"
+    },
+    "request_body": {
+        "total": {
+            "amount": 984,
+            "currencyCode": "GBP"
+        },
+        "orderReference": "DYNAMIC-1762935667077",
+        "shopperInteraction": "ecommerce",
+        "shopperEmailAddress": "customer@example.com",
+        "doCapture": true,
+        "doSendReceipt": true,
+        "type": "sale"
+    }
+}
+
+[2025-11-12 08:21:07] Transaction Error
+================================================================================
+{
+    "timestamp": "2025-11-12 08:21:07",
+    "endpoint": "POST /transactions",
+    "error": "[400] Client error: `POST https://uat.api.converge.eu.elavonaws.com/transactions` resulted in a `400 Bad Request` response:\n{\n  \"status\" : 400,\n  \"failures\" : [ {\n    \"code\" : \"badRequest\",\n    \"description\" : \"The request is invalid; correct a (truncated...)\n",
+    "trace": "#0 /app/src/V1/EPG/ElavonPlayground/TransactionsApi.php(506): Gear4music\\ElavonPlayground\\V1\\EPG\\ElavonPlayground\\TransactionsApi->createTransactionWithHttpInfo(Object(Gear4music\\ElavonPlayground\\V1\\EPG\\Model\\SaleTransaction), NULL, NULL, NULL)\n#1 /app/src/V1/EPG/Client.php(642): Gear4music\\ElavonPlayground\\V1\\EPG\\ElavonPlayground\\TransactionsApi->createTransaction(Object(Gear4music\\ElavonPlayground\\V1\\EPG\\Model\\SaleTransaction))\n#2 /app/src/V1/Controller/ProcessGooglepayDirect.php(49): Gear4music\\ElavonPlayground\\V1\\EPG\\Client->processGooglePayDirect('{\"signature\":\"M...', 984.0, 'GBP', 'DYNAMIC-1762935...', 'customer@exampl...', Array)\n#3 /app/vendor/gear4music/php-japi/src/Gear4music/JAPI/Controller.php(53): Gear4music\\ElavonPlayground\\V1\\Controller\\ProcessGooglePayDirect->dispatch()\n#4 /app/vendor/gear4music/php-japi/src/Gear4music/JAPI/Application.php(98): Gear4music\\JAPI\\Controller->__invoke(Object(Gear4music\\JAPI\\ServerRequest), Object(GuzzleHttp\\Psr7\\Response), Object(Gear4music\\JAPI\\ExtendedApplication))\n#5 /app/vendor/gear4music/php-japi/src/Gear4music/JAPI/Application.php(72): Gear4music\\JAPI\\Application->__invoke(Object(Gear4music\\JAPI\\ServerRequest), Object(GuzzleHttp\\Psr7\\Response))\n#6 /app/vendor/gear4music/php-japi-extended/public/index.php(55): Gear4music\\JAPI\\Application->run(Object(Gear4music\\JAPI\\ServerRequest), Object(GuzzleHttp\\Psr7\\Response))\n#7 /var/www/html/g4mapp.php(14): require_once('/app/vendor/gea...')\n#8 {main}"
+}
