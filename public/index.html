@@ -155,6 +155,9 @@
 <script>
     const MessageTypes = window.ElavonLightbox.MessageTypes;
 
+    // Store transaction IDs for workflow
+    let authorizationTransactionId = null;
+
     const submitData = async (data) => {
         console.log(data);
         const response = await fetch('http://localhost:8080/v1/get-epg-transaction', {
@@ -167,6 +170,14 @@
             }
         });
         const responseJson = await response.json();
+
+        // Store transaction ID from authorization
+        if (responseJson.transaction && responseJson.transaction.id) {
+            authorizationTransactionId = responseJson.transaction.id;
+            document.getElementById('googlepay-capture-transaction-id').value = authorizationTransactionId;
+            document.getElementById('googlepay-status-transaction-id').value = authorizationTransactionId;
+        }
+
         document.getElementById('result').innerHTML = JSON.stringify(responseJson, null, 4);
     };
 
@@ -260,11 +271,12 @@
         document.getElementById('result').innerHTML = JSON.stringify(responseJson, null, 4);
     }
 
-    const createGooglePaySession = async () => {
-        const amount = parseFloat(document.getElementById('googlepay-amount').value);
-        const orderNumber = document.getElementById('googlepay-order-number').value;
-        const currencyCode = document.getElementById('googlepay-currency-code').value || 'GBP';
-        const email = document.getElementById('googlepay-email').value || 'test@example.com';
+    // Google Pay Authorization & Capture Functions
+    const createGooglePayAuthorizationSession = async () => {
+        const amount = parseFloat(document.getElementById('googlepay-auth-amount').value);
+        const orderNumber = document.getElementById('googlepay-auth-order-number').value;
+        const currencyCode = document.getElementById('googlepay-auth-currency-code').value || 'GBP';
+        const email = document.getElementById('googlepay-auth-email').value || 'test@example.com';
 
         if (!amount || !orderNumber) {
             alert('Please enter amount and order number');
@@ -272,9 +284,9 @@
         }
 
         try {
-            document.getElementById('result').innerHTML = 'Creating Google Pay payment session...';
+            document.getElementById('result').innerHTML = 'Creating Google Pay AUTHORIZATION session (do_capture = false)...';
 
-            const response = await fetch('http://localhost:8080/v1/create-googlepay-order-and-session', {
+            const response = await fetch('http://localhost:8080/v1/create-googlepay-order-and-session-authorize', {
                 method: 'POST',
                 body: JSON.stringify({
                     amount: amount,
@@ -295,7 +307,7 @@
             }
 
             document.getElementById('result').innerHTML =
-                '<div>NOW LOADING ELAVON HOSTED PAYMENT PAGE (with Google Pay)...</div>' +
+                '<div>AUTHORIZATION SESSION CREATED (do_capture = false)</div>' +
                 '<div>Session details:</div>' +
                 JSON.stringify(responseJson, null, 4);
 
@@ -325,25 +337,81 @@
             }
 
         } catch (err) {
-            console.error('Error creating Google Pay session:', err);
+            console.error('Error creating authorization session:', err);
             document.getElementById('result').innerHTML = 'Error: ' + err.message;
         }
     };
 
-    const getGooglePayTransaction = async () => {
-        const transactionId = document.getElementById('googlepay-transaction-id').value;
-        const sessionId = document.getElementById('googlepay-session-id').value;
+    const captureGooglePayTransaction = async () => {
+        const transactionId = document.getElementById('googlepay-capture-transaction-id').value;
+        const amount = document.getElementById('googlepay-capture-amount').value;
+        const currencyCode = document.getElementById('googlepay-capture-currency-code').value;
 
-        if (!transactionId && !sessionId) {
-            alert('Please enter a Transaction ID or Session ID');
+        if (!transactionId) {
+            alert('Please enter a Transaction ID to capture');
             return;
         }
 
         try {
-            document.getElementById('result').innerHTML = 'Fetching transaction...';
-            await getEpgTransaction(transactionId || null, sessionId || null);
+            document.getElementById('result').innerHTML = 'Capturing transaction...';
+
+            const requestBody = {
+                transaction_id: transactionId
+            };
+
+            // Only include amount/currency if specified (for partial capture)
+            if (amount) {
+                requestBody.amount = parseFloat(amount);
+                requestBody.currency_code = currencyCode || 'GBP';
+            }
+
+            const response = await fetch('http://localhost:8080/v1/capture-googlepay-transaction', {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('result').innerHTML =
+                '<div>CAPTURE COMPLETED</div>' +
+                JSON.stringify(responseJson, null, 4);
+
         } catch (err) {
-            console.error('Error in getGooglePayTransaction:', err);
+            console.error('Error capturing transaction:', err);
+            document.getElementById('result').innerHTML = 'Error: ' + err.message;
+        }
+    };
+
+    const getGooglePayTransactionStatus = async () => {
+        const transactionId = document.getElementById('googlepay-status-transaction-id').value;
+
+        if (!transactionId) {
+            alert('Please enter a Transaction ID');
+            return;
+        }
+
+        try {
+            document.getElementById('result').innerHTML = 'Fetching transaction status...';
+
+            const response = await fetch('http://localhost:8080/v1/get-googlepay-transaction-status', {
+                method: 'POST',
+                body: JSON.stringify({
+                    transaction_id: transactionId
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('result').innerHTML =
+                '<div>TRANSACTION STATUS</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error fetching status:', err);
             document.getElementById('result').innerHTML = 'Error: ' + err.message;
         }
     };
@@ -913,34 +981,50 @@
     </div>
 
     <div class="rows">
-        <h2>Google Pay (EPG Lightbox - Route 1)</h2>
+        <h2>Google Pay - Authorization & Capture</h2>
+
         <div class="rows">
-            <h3>Create Payment</h3>
-            <label for="googlepay-amount">Amount</label>
-            <input id="googlepay-amount" type="text" value="10.00" class="formItem" placeholder="10.00"/>
+            <h3>Step 1: Create Authorization (do_capture = false)</h3>
+            <label for="googlepay-auth-amount">Amount</label>
+            <input id="googlepay-auth-amount" type="text" value="10.00" class="formItem" placeholder="10.00"/>
 
-            <label for="googlepay-order-number">Order Number</label>
-            <input id="googlepay-order-number" type="text" value="" class="formItem" placeholder="ORDER-123"/>
+            <label for="googlepay-auth-order-number">Order Number</label>
+            <input id="googlepay-auth-order-number" type="text" value="" class="formItem" placeholder="ORDER-AUTH-123"/>
 
-            <label for="googlepay-currency-code">Currency Code</label>
-            <input id="googlepay-currency-code" type="text" value="GBP" class="formItem" placeholder="GBP"/>
+            <label for="googlepay-auth-currency-code">Currency Code</label>
+            <input id="googlepay-auth-currency-code" type="text" value="GBP" class="formItem" placeholder="GBP"/>
 
-            <label for="googlepay-email">Customer Email</label>
-            <input id="googlepay-email" type="text" value="" class="formItem" placeholder="customer@example.com"/>
+            <label for="googlepay-auth-email">Customer Email</label>
+            <input id="googlepay-auth-email" type="text" value="" class="formItem" placeholder="customer@example.com"/>
 
-            <button class="formItem" onclick="createGooglePaySession()">
-                Create Google Pay Payment Session
+            <button class="formItem" onclick="createGooglePayAuthorizationSession()">
+                Create Authorization Session
             </button>
         </div>
-        <div class="rows">
-            <h3>Get Transaction</h3>
-            <label for="googlepay-transaction-id">Transaction ID</label>
-            <input id="googlepay-transaction-id" type="text" value="" class="formItem"/>
-            <label for="googlepay-session-id">Session ID</label>
-            <input id="googlepay-session-id" type="text" value="" class="formItem"/>
 
-            <button class="formItem" onclick="getGooglePayTransaction()">
-                Get Transaction
+        <div class="rows">
+            <h3>Step 2: Capture Transaction (do_capture = true)</h3>
+            <label for="googlepay-capture-transaction-id">Transaction ID (from Step 1)</label>
+            <input id="googlepay-capture-transaction-id" type="text" value="" class="formItem" placeholder="Will be filled automatically"/>
+
+            <label for="googlepay-capture-amount">Amount (optional - leave blank for full)</label>
+            <input id="googlepay-capture-amount" type="text" value="" class="formItem" placeholder="Leave blank for full amount"/>
+
+            <label for="googlepay-capture-currency-code">Currency Code</label>
+            <input id="googlepay-capture-currency-code" type="text" value="GBP" class="formItem" placeholder="GBP"/>
+
+            <button class="formItem" onclick="captureGooglePayTransaction()">
+                Capture Transaction
+            </button>
+        </div>
+
+        <div class="rows">
+            <h3>Step 3: Get Transaction Status</h3>
+            <label for="googlepay-status-transaction-id">Transaction ID</label>
+            <input id="googlepay-status-transaction-id" type="text" value="" class="formItem" placeholder="Will be filled automatically"/>
+
+            <button class="formItem" onclick="getGooglePayTransactionStatus()">
+                Get Transaction Status
             </button>
         </div>
     </div>

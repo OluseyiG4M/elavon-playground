@@ -11,7 +11,11 @@ use Gear4music\JAPI\AuthSpecInterface;
 use Gear4music\JAPI\ExtendedController;
 use Gear4music\JAPI\RequestValidatorSpec\NoValidation;
 
-class CreateGooglePayOrderAndSession extends ExtendedController
+/**
+ * Create Google Pay order and session with AUTHORIZATION only (do_capture = false)
+ * This creates an authorization that can be captured later
+ */
+class CreateGooglePayOrderAndSessionAuthorize extends ExtendedController
 {
     public function dispatch(): void
     {
@@ -48,7 +52,7 @@ class CreateGooglePayOrderAndSession extends ExtendedController
                 ]
             );
 
-            // Create payment session with Google Pay enabled
+            // Create payment session with Google Pay enabled - AUTHORIZATION only
             $session = $client->createPaymentSessionWithGooglePay(
                 $order->getHref(),
                 $this->getEnvironment()->getVar('ELAVON_ACCOUNT_ID'),
@@ -61,6 +65,7 @@ class CreateGooglePayOrderAndSession extends ExtendedController
                 'GBR',
                 $request->email ?? 'oluseyi-test@example.com',
                 '0123456789',
+                false // do_capture = false - AUTHORIZATION ONLY
             );
         } catch (ApiException $e) {
             $this->setResponseJson([
@@ -78,6 +83,7 @@ class CreateGooglePayOrderAndSession extends ExtendedController
 
         $this->setResponseJson([
             'success' => true,
+            'mode' => 'authorization',
             'order' => $order->jsonSerialize(),
             'session' => $session->jsonSerialize()
         ]);
