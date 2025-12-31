@@ -416,8 +416,94 @@
         }
     };
 
-    // ============= DYNAMIC PRICING POC (Route 3) =============
+    const voidGooglePayTransaction = async () => {
+        const transactionId = document.getElementById('googlepay-void-transaction-id').value;
+        const orderReference = document.getElementById('googlepay-void-order-reference').value;
 
+        if (!transactionId) {
+            alert('Please enter a Transaction ID to void');
+            return;
+        }
+
+        try {
+            document.getElementById('result').innerHTML = 'Voiding transaction...';
+
+            const requestBody = {
+                transaction_id: transactionId
+            };
+
+            if (orderReference) {
+                requestBody.order_reference = orderReference;
+            }
+
+            const response = await fetch('http://localhost:8080/v1/void-googlepay-transaction', {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('result').innerHTML =
+                '<div>VOID TRANSACTION RESULT</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error voiding transaction:', err);
+            document.getElementById('result').innerHTML = 'Error: ' + err.message;
+        }
+    };
+
+    const refundGooglePayTransaction = async () => {
+        const transactionId = document.getElementById('googlepay-refund-transaction-id').value;
+        const amount = document.getElementById('googlepay-refund-amount').value;
+        const currencyCode = document.getElementById('googlepay-refund-currency-code').value;
+        const orderReference = document.getElementById('googlepay-refund-order-reference').value;
+        const email = document.getElementById('googlepay-refund-email').value;
+
+        if (!transactionId || !amount) {
+            alert('Please enter Transaction ID and Amount');
+            return;
+        }
+
+        try {
+            document.getElementById('result').innerHTML = 'Processing refund...';
+
+            const requestBody = {
+                transaction_id: transactionId,
+                amount: parseFloat(amount),
+                currency_code: currencyCode || 'GBP'
+            };
+
+            if (orderReference) {
+                requestBody.order_reference = orderReference;
+            }
+
+            if (email) {
+                requestBody.email = email;
+            }
+
+            const response = await fetch('http://localhost:8080/v1/refund-googlepay-transaction', {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('result').innerHTML =
+                '<div>REFUND TRANSACTION RESULT</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error refunding transaction:', err);
+            document.getElementById('result').innerHTML = 'Error: ' + err.message;
+        }
+    };
+
+    // Dynamic Pricing POC Functions
     const dynamicPricing = {
         basePrice: 820.00,
         taxRate: 0.20,
@@ -1025,6 +1111,49 @@
 
             <button class="formItem" onclick="getGooglePayTransactionStatus()">
                 Get Transaction Status
+            </button>
+        </div>
+    </div>
+
+    <div class="rows">
+        <h2>Google Pay - Void Transaction</h2>
+        <p style="font-size: 14px; color: #666; margin-bottom: 10px;">Void an authorized transaction before it's captured</p>
+
+        <div class="rows">
+            <label for="googlepay-void-transaction-id">Transaction ID</label>
+            <input id="googlepay-void-transaction-id" type="text" value="" class="formItem" placeholder="Transaction ID to void"/>
+
+            <label for="googlepay-void-order-reference">Order Reference (optional)</label>
+            <input id="googlepay-void-order-reference" type="text" value="" class="formItem" placeholder="Optional"/>
+
+            <button class="formItem" onclick="voidGooglePayTransaction()">
+                Void Transaction
+            </button>
+        </div>
+    </div>
+
+    <div class="rows">
+        <h2>Google Pay - Refund Transaction</h2>
+        <p style="font-size: 14px; color: #666; margin-bottom: 10px;">Refund a captured/settled transaction</p>
+
+        <div class="rows">
+            <label for="googlepay-refund-transaction-id">Transaction ID</label>
+            <input id="googlepay-refund-transaction-id" type="text" value="" class="formItem" placeholder="Transaction ID to refund"/>
+
+            <label for="googlepay-refund-amount">Refund Amount</label>
+            <input id="googlepay-refund-amount" type="text" value="" class="formItem" placeholder="10.00"/>
+
+            <label for="googlepay-refund-currency-code">Currency Code</label>
+            <input id="googlepay-refund-currency-code" type="text" value="GBP" class="formItem" placeholder="GBP"/>
+
+            <label for="googlepay-refund-order-reference">Order Reference (optional)</label>
+            <input id="googlepay-refund-order-reference" type="text" value="" class="formItem" placeholder="Optional"/>
+
+            <label for="googlepay-refund-email">Customer Email (optional - for receipt)</label>
+            <input id="googlepay-refund-email" type="text" value="" class="formItem" placeholder="Optional"/>
+
+            <button class="formItem" onclick="refundGooglePayTransaction()">
+                Refund Transaction
             </button>
         </div>
     </div>

@@ -686,7 +686,7 @@ class Client
             $refundData['do_send_receipt'] = true;
         }
 
-        $transaction = new TransactionInput($refundData);
+        $transaction = new Transaction($refundData);
         $transaction->setType(TransactionType::REFUND);
 
         $this->logElavonRequest('Refund Transaction Request', [
