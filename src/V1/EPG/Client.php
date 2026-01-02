@@ -5,24 +5,29 @@ declare(strict_types=1);
 namespace Gear4music\ElavonPlayground\V1\EPG;
 
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\AccountsApi;
+use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\GooglePayPaymentsApi;
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\OrdersApi;
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\PaymentSessionsApi;
 use Gear4music\ElavonPlayground\V1\EPG\ElavonPlayground\TransactionsApi;
 use Gear4music\ElavonPlayground\V1\EPG\Model\Blik;
 use Gear4music\ElavonPlayground\V1\EPG\Model\Contact;
 use Gear4music\ElavonPlayground\V1\EPG\Model\FailureWrapper;
+use Gear4music\ElavonPlayground\V1\EPG\Model\GooglePayPayment;
+use Gear4music\ElavonPlayground\V1\EPG\Model\GooglePayPaymentInput;
 use Gear4music\ElavonPlayground\V1\EPG\Model\HppType;
 use Gear4music\ElavonPlayground\V1\EPG\Model\Order;
 use Gear4music\ElavonPlayground\V1\EPG\Model\OrderInput;
 use Gear4music\ElavonPlayground\V1\EPG\Model\OrderItem;
 use Gear4music\ElavonPlayground\V1\EPG\Model\OrderItemType;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentMethod;
+use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentMethodOrigin;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentSession;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PaymentSessionInput;
 use Gear4music\ElavonPlayground\V1\EPG\Model\PositiveAmountAndCurrency;
 use Gear4music\ElavonPlayground\V1\EPG\Model\SaleTransaction;
 use Gear4music\ElavonPlayground\V1\EPG\Model\ShopperInteraction;
 use Gear4music\ElavonPlayground\V1\EPG\Model\Transaction;
+use Gear4music\ElavonPlayground\V1\EPG\Model\TransactionInput;
 use Gear4music\ElavonPlayground\V1\EPG\Model\TransactionType;
 use GuzzleHttp\Promise\PromiseInterface;
 
@@ -35,6 +40,7 @@ class Client
     private OrdersApi $ordersApi;
     private PaymentSessionsApi $paymentSessionsApi;
     private AccountsApi $accountsApi;
+    private GooglePayPaymentsApi $googlePayPaymentsApi;
 
     private string $host;
 
@@ -58,6 +64,10 @@ class Client
             $configuration
         );
         $this->accountsApi = new AccountsApi(
+            new \GuzzleHttp\Client(),
+            $configuration
+        );
+        $this->googlePayPaymentsApi = new GooglePayPaymentsApi(
             new \GuzzleHttp\Client(),
             $configuration
         );
@@ -143,8 +153,22 @@ class Client
      */
     public function getTransaction(string $transactionId): Transaction
     {
+        $this->logElavonRequest('Get Transaction Request', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'GET /transactions/' . $transactionId,
+            'transaction_id' => $transactionId,
+        ]);
+
         $response = $this->transactionsApi->retrieveTransaction($transactionId);
+
         if ($response instanceof FailureWrapper) {
+            $this->logElavonRequest('Get Transaction Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'GET /transactions/' . $transactionId,
+                'error' => $response->getFailures()[0]->getCode(),
+                'description' => $response->getFailures()[0]->getDescription(),
+            ]);
+
             throw new \Exception(
                 sprintf(
                     "Error: Code: %s, Desc: %s",
@@ -154,6 +178,13 @@ class Client
                 $response->getStatus()
             );
         } else {
+            $this->logElavonRequest('Get Transaction Response', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'GET /transactions/' . $transactionId,
+                'status' => 'success',
+                'response_body' => json_decode(json_encode($response), true),
+            ]);
+
             return $response;
         }
     }
@@ -253,13 +284,27 @@ class Client
             'order_reference' => $orderNumber,
         ]);
 
+        $this->logElavonRequest('Create Order Request', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /orders',
+            'request_body' => json_decode(json_encode($orderInput), true),
+        ]);
+
         $response = $this->ordersApi->createOrder(
             self::ACCEPT_JSON,
             self::API_VERSION,
             self::ACCEPT_JSON,
             $orderInput
         );
+
         if ($response instanceof FailureWrapper) {
+            $this->logElavonRequest('Create Order Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /orders',
+                'error' => $response->getFailures()[0]->getCode(),
+                'description' => $response->getFailures()[0]->getDescription(),
+            ]);
+
             throw new \Exception(
                 sprintf(
                     "Error: Code: %s, Desc: %s",
@@ -269,6 +314,13 @@ class Client
                 $response->getStatus()
             );
         } else {
+            $this->logElavonRequest('Create Order Response', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /orders',
+                'status' => 'success',
+                'response_body' => json_decode(json_encode($response), true),
+            ]);
+
             return $response;
         }
     }
@@ -366,5 +418,611 @@ class Client
         } else {
             return $response;
         }
+    }
+
+    /**
+     * Create a payment session with Google Pay enabled - supports both authorization and capture
+     *
+     * @param string $orderHref Order href returned by createOrder endpoint
+     * @param string $account Account ID
+     * @param string $originUrl Top level URL from which the payment session was initiated
+     * @param string $name Billing Address
+     * @param string $address1
+     * @param string $address2
+     * @param string $city
+     * @param string $postCode
+     * @param string $countryCode ISO3
+     * @param string $email
+     * @param string $phone
+     * @param bool $doCapture Whether to capture immediately (true) or just authorize (false)
+     * @return PaymentSession
+     * @throws ApiException
+     * @throws \Exception
+     */
+    public function createPaymentSessionWithGooglePay(
+        string $orderHref,
+        string $account,
+        string $originUrl,
+        string $name,
+        string $address1,
+        string $address2,
+        string $city,
+        string $postCode,
+        string $countryCode,
+        string $email,
+        string $phone,
+        bool $doCapture = false
+    ): PaymentSession
+    {
+        $billTo = new Contact([
+            'full_name' => $name,
+            'street1' => $address1,
+            'street2' => $address2,
+            'city' => $city,
+            'postal_code' => $postCode,
+            'country_code' => $countryCode,
+            'primary_phone' => $phone,
+            'email' => $email,
+        ]);
+
+        // Configure allowed payment methods
+        $allowedPaymentMethods = [PaymentMethod::CARD];
+        $allowedPaymentMethodOrigins = [PaymentMethodOrigin::GOOGLE_PAY];
+
+        $paymentSessionInput = new PaymentSessionInput([
+            'order' => $orderHref,
+            'account' => $this->host . '/accounts/' . $account,
+            'origin_url' => $originUrl,
+            'do_create_transaction' => true,
+            'do_capture' => $doCapture,
+            'bill_to' => $billTo,
+            'allowed_payment_methods' => $allowedPaymentMethods,
+            'allowed_payment_method_origins' => $allowedPaymentMethodOrigins,
+            'hpp_type' => HppType::LIGHTBOX,
+            'shopper_email_address' => $email,
+        ]);
+
+        $this->logElavonRequest('Create Payment Session (Google Pay) Request', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /payment-sessions',
+            'do_capture' => $doCapture,
+            'request_body' => json_decode(json_encode($paymentSessionInput), true),
+        ]);
+
+        $response = $this->paymentSessionsApi->createPaymentSession(
+            self::ACCEPT_JSON,
+            self::API_VERSION,
+            self::ACCEPT_JSON,
+            $paymentSessionInput
+        );
+
+        if ($response instanceof FailureWrapper) {
+            $this->logElavonRequest('Create Payment Session (Google Pay) Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /payment-sessions',
+                'error' => $response->getFailures()[0]->getCode(),
+                'description' => $response->getFailures()[0]->getDescription(),
+            ]);
+
+            throw new \Exception(
+                sprintf(
+                    "Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        $this->logElavonRequest('Create Payment Session (Google Pay) Response', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /payment-sessions',
+            'status' => 'success',
+            'session_id' => $response->getId(),
+            'do_capture' => $doCapture,
+            'response_body' => json_decode(json_encode($response), true),
+        ]);
+
+        return $response;
+    }
+
+    /**
+     * Capture a previously authorized transaction
+     *
+     * Note: Elavon doesn't have a separate CAPTURE transaction type.
+     * To capture, we update the transaction with do_capture=true
+     *
+     * @param string $transactionId The ID of the authorized transaction
+     * @param float|null $amount Optional: Amount to capture (if different from authorization)
+     * @param string|null $currencyCode Optional: Currency code
+     * @return Transaction
+     * @throws ApiException
+     * @throws \Exception
+     */
+    public function captureTransaction(
+        string $transactionId,
+        ?float $amount = null,
+        ?string $currencyCode = null
+    ): Transaction
+    {
+        $updateData = [
+            'do_capture' => true,
+        ];
+
+        // If specific amount is provided, include it for partial capture
+        if ($amount !== null && $currencyCode !== null) {
+            $updateData['total'] = new PositiveAmountAndCurrency([
+                'amount' => $amount,
+                'currency_code' => $currencyCode,
+            ]);
+        }
+
+        $transaction = new Transaction($updateData);
+
+        $this->logElavonRequest('Capture Transaction Request', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /transactions/' . $transactionId,
+            'transaction_id' => $transactionId,
+            'capture_amount' => $amount,
+            'currency_code' => $currencyCode,
+            'request_body' => json_decode(json_encode($transaction), true),
+        ]);
+
+        $response = $this->transactionsApi->updateTransaction(
+            $transactionId,
+            self::ACCEPT_JSON,
+            self::API_VERSION,
+            self::ACCEPT_JSON,
+            $transaction
+        );
+
+        if ($response instanceof FailureWrapper) {
+            $this->logElavonRequest('Capture Transaction Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions/' . $transactionId,
+                'error' => $response->getFailures()[0]->getCode(),
+                'description' => $response->getFailures()[0]->getDescription(),
+            ]);
+
+            throw new \Exception(
+                sprintf(
+                    "Capture Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        $this->logElavonRequest('Capture Transaction Response', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /transactions/' . $transactionId,
+            'status' => 'success',
+            'response_body' => json_decode(json_encode($response), true),
+        ]);
+
+        return $response;
+    }
+
+    public function voidTransaction(
+        string $parentTransactionId,
+        ?string $orderReference = null
+    ): Transaction
+    {
+        $voidData = [
+            'type' => TransactionType::VOID,
+            'parent_transaction' => $this->host . '/transactions/' . $parentTransactionId,
+        ];
+
+        if ($orderReference !== null) {
+            $voidData['order_reference'] = $orderReference;
+        }
+
+        $transaction = new Transaction($voidData);
+        $transaction->setType(TransactionType::VOID);
+
+        $this->logElavonRequest('Void Transaction Request', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /transactions',
+            'parent_transaction_id' => $parentTransactionId,
+            'request_body' => json_decode(json_encode($transaction), true),
+        ]);
+
+        $response = $this->transactionsApi->createTransaction($transaction);
+
+        if ($response instanceof FailureWrapper) {
+            $this->logElavonRequest('Void Transaction Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'error' => $response->getFailures()[0]->getCode(),
+                'description' => $response->getFailures()[0]->getDescription(),
+            ]);
+
+            throw new \Exception(
+                sprintf(
+                    "Void Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        $this->logElavonRequest('Void Transaction Response', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /transactions',
+            'status' => 'success',
+            'void_transaction_id' => $response->getId(),
+            'response_body' => json_decode(json_encode($response), true),
+        ]);
+
+        return $response;
+    }
+
+    public function refundTransaction(
+        string $parentTransactionId,
+        float $amount,
+        string $currencyCode,
+        ?string $orderReference = null,
+        ?string $email = null
+    ): Transaction
+    {
+        $refundData = [
+            'type' => TransactionType::REFUND,
+            'parent_transaction' => $this->host . '/transactions/' . $parentTransactionId,
+            'total' => new PositiveAmountAndCurrency([
+                'amount' => $amount,
+                'currency_code' => $currencyCode,
+            ]),
+            'shopper_interaction' => ShopperInteraction::ECOMMERCE,
+        ];
+
+        if ($orderReference !== null) {
+            $refundData['order_reference'] = $orderReference;
+        }
+
+        if ($email !== null) {
+            $refundData['shopper_email_address'] = $email;
+            $refundData['do_send_receipt'] = true;
+        }
+
+        $transaction = new Transaction($refundData);
+        $transaction->setType(TransactionType::REFUND);
+
+        $this->logElavonRequest('Refund Transaction Request', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /transactions',
+            'parent_transaction_id' => $parentTransactionId,
+            'refund_amount' => $amount,
+            'currency_code' => $currencyCode,
+            'request_body' => json_decode(json_encode($transaction), true),
+        ]);
+
+        $response = $this->transactionsApi->createTransaction($transaction);
+
+        if ($response instanceof FailureWrapper) {
+            $this->logElavonRequest('Refund Transaction Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'error' => $response->getFailures()[0]->getCode(),
+                'description' => $response->getFailures()[0]->getDescription(),
+            ]);
+
+            throw new \Exception(
+                sprintf(
+                    "Refund Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        $this->logElavonRequest('Refund Transaction Response', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /transactions',
+            'status' => 'success',
+            'refund_transaction_id' => $response->getId(),
+            'response_body' => json_decode(json_encode($response), true),
+        ]);
+
+        return $response;
+    }
+
+    /**
+     * Retrieve a Google Pay payment by ID
+     *
+     * @param string $paymentId The Google Pay payment ID
+     * @return GooglePayPayment
+     * @throws ApiException
+     * @throws \Exception
+     */
+    public function getGooglePayPayment(string $paymentId): GooglePayPayment
+    {
+        $response = $this->googlePayPaymentsApi->retrieveGooglePayPayment(
+            $paymentId,
+            self::ACCEPT_JSON,
+            self::API_VERSION
+        );
+
+        if ($response instanceof FailureWrapper) {
+            throw new \Exception(
+                sprintf(
+                    "Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        return $response;
+    }
+
+    /**
+     * Process Google Pay payment directly using token from Google Pay API
+     * This is for Route 3: Direct Google Pay API integration with dynamic pricing
+     *
+     * @param string $paymentToken Encrypted Google Pay token
+     * @param float $amount Final transaction amount
+     * @param string $currencyCode Currency code (e.g., 'GBP')
+     * @param string $orderNumber Order reference
+     * @param string $email Customer email
+     * @param array $paymentData Full payment data from Google Pay
+     * @return Transaction|FailureWrapper
+     * @throws \Exception
+     */
+    public function processGooglePayDirect(
+        string $paymentToken,
+        float $amount,
+        string $currencyCode,
+        string $orderNumber,
+        string $email,
+        array $paymentData = []
+    ): Transaction|FailureWrapper
+    {
+        // Extract billing info from Google Pay data if available
+        $billTo = null;
+
+        $paymentMethodData = isset($paymentData['paymentMethodData'])
+            ? $paymentData['paymentMethodData']
+            : null;
+
+        if ($paymentMethodData && isset($paymentMethodData['info'])) {
+            $info = $paymentMethodData['info'];
+
+            if (isset($info['billingAddress'])) {
+                $billingAddress = $info['billingAddress'];
+
+                $billTo = new Contact([
+                    'full_name' => $billingAddress['name'] ?? 'Customer',
+                    'street1' => $billingAddress['address1'] ?? '',
+                    'street2' => $billingAddress['address2'] ?? null,
+                    'city' => $billingAddress['locality'] ?? '',
+                    'region' => $billingAddress['administrativeArea'] ?? null,
+                    'postal_code' => $billingAddress['postalCode'] ?? '',
+                    'country_code' => $this->convertCountryCode($billingAddress['countryCode'] ?? 'GB'),
+                    'email' => $email,
+                ]);
+            }
+        }
+
+        // Step 1: Create GooglePayPaymentInput with the token
+        $googlePayInput = new GooglePayPaymentInput([
+            'token' => $paymentToken,
+            'custom_reference' => $orderNumber,
+        ]);
+
+        if ($billTo) {
+            $googlePayInput->setCard(new \Gear4music\ElavonPlayground\V1\EPG\Model\Card([
+                'bill_to' => $billTo
+            ]));
+        }
+
+        try {
+            // Log the request details
+            $googlePayRequestLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /google-pay-payments',
+                'full_url' => $this->googlePayPaymentsApi->getConfig()->getHost() . '/google-pay-payments',
+                'headers' => [
+                    'Accept' => self::ACCEPT_JSON,
+                    'Accept-Version' => self::API_VERSION,
+                    'Content-Type' => self::ACCEPT_JSON,
+                    'Authorization' => 'Basic ' . base64_encode(
+                            $this->googlePayPaymentsApi->getConfig()->getUsername() . ':***'
+                        ),
+                ],
+                'request_body' => json_decode(json_encode($googlePayInput), true),
+            ];
+
+            $this->logElavonRequest('Google Pay Payment Request', $googlePayRequestLog);
+
+            $googlePayPayment = $this->googlePayPaymentsApi->createGooglePayPayment(
+                self::ACCEPT_JSON,
+                self::API_VERSION,
+                self::ACCEPT_JSON,
+                $googlePayInput
+            );
+
+            $googlePayResponseLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /google-pay-payments',
+                'status' => 'success',
+                'response_body' => json_decode(json_encode($googlePayPayment), true),
+            ];
+
+            $this->logElavonRequest('Google Pay Payment Response', $googlePayResponseLog);
+
+        } catch (\Exception $e) {
+            $this->logElavonRequest('Google Pay Payment Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /google-pay-payments',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+
+        if ($googlePayPayment instanceof FailureWrapper) {
+            throw new \Exception(
+                sprintf(
+                    "Google Pay Payment Error: Code: %s, Desc: %s",
+                    $googlePayPayment->getFailures()[0]->getCode(),
+                    $googlePayPayment->getFailures()[0]->getDescription(),
+                ),
+                $googlePayPayment->getStatus()
+            );
+        }
+
+        // Step 3: Create a transaction using the Google Pay payment
+        $transaction = new SaleTransaction([
+            'type' => TransactionType::SALE,
+            'total' => new PositiveAmountAndCurrency([
+                'amount' => $amount,
+                'currency_code' => $currencyCode,
+            ]),
+            'order_reference' => $orderNumber,
+            'shopper_interaction' => ShopperInteraction::ECOMMERCE,
+            'shopper_email_address' => $email,
+            'google_pay_payment' => $googlePayPayment->getHref(), // Reference the GooglePayPayment
+            'do_capture' => true,
+            'do_send_receipt' => true
+        ]);
+
+        $transaction->setType(TransactionType::SALE);
+
+        try {
+            // Log the request details
+            $transactionRequestLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'full_url' => $this->transactionsApi->getConfig()->getHost() . '/transactions',
+                'headers' => [
+                    'Accept' => 'application/json',
+                    'Accept-Version' => self::API_VERSION,
+                    'Content-Type' => 'application/json',
+                    'Authorization' => 'Basic ' . base64_encode(
+                            $this->transactionsApi->getConfig()->getUsername() . ':***'
+                        ),
+                ],
+                'request_body' => json_decode(json_encode($transaction), true),
+            ];
+
+            $this->logElavonRequest('Transaction Request', $transactionRequestLog);
+
+            $transactionResult = $this->transactionsApi->createTransaction($transaction);
+
+            $transactionResponseLog = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'status' => 'success',
+                'response_body' => json_decode(json_encode($transactionResult), true),
+            ];
+
+            $this->logElavonRequest('Transaction Response', $transactionResponseLog);
+
+        } catch (\Exception $e) {
+            $this->logElavonRequest('Transaction Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /transactions',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+
+        if ($transactionResult instanceof FailureWrapper) {
+            throw new \Exception(
+                sprintf(
+                    "Transaction Error: Code: %s, Desc: %s",
+                    $transactionResult->getFailures()[0]->getCode(),
+                    $transactionResult->getFailures()[0]->getDescription(),
+                ),
+                $transactionResult->getStatus()
+            );
+        }
+
+        return $transactionResult;
+    }
+
+    private function logElavonRequest(string $title, array $data): void
+    {
+        $logDir = __DIR__ . '/../../logs';
+
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+
+        $logFile = $logDir . '/elavon_' . date('Y-m-d') . '.log';
+
+        // Sanitize sensitive data before logging
+        $sanitizedData = $this->sanitizeSensitiveData($data);
+
+        $logEntry = sprintf(
+            "\n[%s] %s\n%s\n%s\n",
+            date('Y-m-d H:i:s'),
+            $title,
+            str_repeat('=', 80),
+            json_encode($sanitizedData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+        );
+
+        file_put_contents($logFile, $logEntry, FILE_APPEND);
+    }
+
+    private function sanitizeSensitiveData(array $data): array
+    {
+        $sensitiveKeys = [
+            'token',
+            'password',
+            'secret',
+            'api_key',
+            'apiKey',
+            'authorization',
+            'Authorization',
+            'signature',
+            'signedMessage',
+            'signed_message',
+            'protocolVersion',
+            'intermediateSigningKey',
+            'card_number',
+            'cardNumber',
+            'cvv',
+            'cvc',
+            'pan',
+        ];
+
+        array_walk_recursive($data, function (&$value, $key) use ($sensitiveKeys) {
+            if (!is_string($key)) {
+                return;
+            }
+            $keyLower = strtolower($key);
+            foreach ($sensitiveKeys as $sensitiveKey) {
+                if (stripos($keyLower, strtolower($sensitiveKey)) !== false) {
+                    if (is_string($value) && strlen($value) > 0) {
+                        $value = 'xxxxxxxxxxxxxx';
+                    }
+                    break;
+                }
+            }
+        });
+
+        return $data;
+    }
+
+    private function convertCountryCode(string $iso2): string
+    {
+        $countryMap = [
+            'GB' => 'GBR',
+            'US' => 'USA',
+            'DE' => 'DEU',
+            'FR' => 'FRA',
+            'IT' => 'ITA',
+            'ES' => 'ESP',
+            'NL' => 'NLD',
+            'PL' => 'POL',
+        ];
+
+        return $countryMap[$iso2] ?? $iso2;
     }
 }

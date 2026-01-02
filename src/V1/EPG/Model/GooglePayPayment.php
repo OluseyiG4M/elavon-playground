@@ -30,6 +30,7 @@ namespace Gear4music\ElavonPlayground\V1\EPG\Model;
 
 use \ArrayAccess;
 use \Gear4music\ElavonPlayground\V1\EPG\ObjectSerializer;
+use Gear4music\ElavonPlayground\V1\EPG\Model\Card;
 
 /**
  * GooglePayPayment Class Doc Comment
