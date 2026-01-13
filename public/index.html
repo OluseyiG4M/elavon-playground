@@ -286,7 +286,7 @@
         try {
             document.getElementById('result').innerHTML = 'Creating Google Pay AUTHORIZATION session (do_capture = false)...';
 
-            const response = await fetch('http://localhost:8080/v1/create-googlepay-order-and-session-authorize', {
+            const response = await fetch('http://localhost:8080/v1/create-google-pay-order-and-session-authorize', {
                 method: 'POST',
                 body: JSON.stringify({
                     amount: amount,
@@ -365,7 +365,7 @@
                 requestBody.currency_code = currencyCode || 'GBP';
             }
 
-            const response = await fetch('http://localhost:8080/v1/capture-googlepay-transaction', {
+            const response = await fetch('http://localhost:8080/v1/capture-google-pay-transaction', {
                 method: 'POST',
                 body: JSON.stringify(requestBody),
                 headers: {
@@ -395,7 +395,7 @@
         try {
             document.getElementById('result').innerHTML = 'Fetching transaction status...';
 
-            const response = await fetch('http://localhost:8080/v1/get-googlepay-transaction-status', {
+            const response = await fetch('http://localhost:8080/v1/get-google-pay-transaction-status', {
                 method: 'POST',
                 body: JSON.stringify({
                     transaction_id: transactionId
@@ -436,7 +436,7 @@
                 requestBody.order_reference = orderReference;
             }
 
-            const response = await fetch('http://localhost:8080/v1/void-googlepay-transaction', {
+            const response = await fetch('http://localhost:8080/v1/void-google-pay-transaction', {
                 method: 'POST',
                 body: JSON.stringify(requestBody),
                 headers: {
@@ -484,7 +484,7 @@
                 requestBody.email = email;
             }
 
-            const response = await fetch('http://localhost:8080/v1/refund-googlepay-transaction', {
+            const response = await fetch('http://localhost:8080/v1/refund-google-pay-transaction', {
                 method: 'POST',
                 body: JSON.stringify(requestBody),
                 headers: {
@@ -715,7 +715,7 @@
 
             console.log('Sending request to backend:', requestPayload);
 
-            const response = await fetch('http://localhost:8080/v1/process-googlepay-direct', {
+            const response = await fetch('http://localhost:8080/v1/process-google-pay-direct', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
