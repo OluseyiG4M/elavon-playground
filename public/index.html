@@ -903,6 +903,262 @@
             initializeGooglePayDynamic();
         }
     }
+
+    let cardAuthorizationTransactionId = null;
+
+    const createCardPaymentSession = async (doCapture = true) => {
+        const prefix = doCapture ? 'card' : 'card-auth';
+        const amount = parseFloat(document.getElementById(`${prefix}-amount`).value);
+        const orderNumber = document.getElementById(`${prefix}-order-number`).value;
+        const currencyCode = document.getElementById(`${prefix}-currency-code`).value || 'GBP';
+        const email = document.getElementById(`${prefix}-email`).value || 'test@example.com';
+
+        if (!amount || !orderNumber) {
+            alert('Please enter amount and order number');
+            return;
+        }
+
+        try {
+            const mode = doCapture ? 'CAPTURE' : 'AUTHORIZATION';
+            document.getElementById('card-result').innerHTML = `Creating Card Payment session (do_capture = ${doCapture})...`;
+
+            const response = await fetch('http://localhost:8080/v1/create-card-payment-order-and-session', {
+                method: 'POST',
+                body: JSON.stringify({
+                    amount: amount,
+                    order_number: orderNumber,
+                    currency_code: currencyCode,
+                    email: email,
+                    do_capture: doCapture
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+
+            if (responseJson.error || !responseJson.success) {
+                document.getElementById('card-result').innerHTML = 'Error: ' + JSON.stringify(responseJson, null, 4);
+                return;
+            }
+
+            document.getElementById('card-result').innerHTML =
+                `<div>CARD ${mode} SESSION CREATED</div>` +
+                '<div>Session details:</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+            const sessionId = responseJson.session.id;
+            let lightbox;
+
+            if (!lightbox) {
+                lightbox = new window.ElavonLightbox({
+                    sessionId: sessionId,
+                    onReady: (error) =>
+                        error
+                            ? console.error('Lightbox failed to load')
+                            : lightbox.show(),
+                    messageHandler: (message, defaultAction) => {
+                        switch (message.type) {
+                            case MessageTypes.transactionCreated:
+                                submitCardData({
+                                    sessionId: message.sessionId,
+                                    doCapture: doCapture
+                                });
+                                break;
+                        }
+                        defaultAction();
+                    },
+                });
+            } else {
+                lightbox.show();
+            }
+
+        } catch (err) {
+            console.error('Error creating card payment session:', err);
+            document.getElementById('card-result').innerHTML = 'Error: ' + err.message;
+        }
+    };
+
+    const submitCardData = async (data) => {
+        console.log('Card transaction data:', data);
+        const response = await fetch('http://localhost:8080/v1/get-epg-transaction', {
+            method: 'POST',
+            body: JSON.stringify({
+                session_id: data.sessionId,
+            }),
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        const responseJson = await response.json();
+
+        // Store transaction ID for capture/void/refund easy access to the transaction ID
+        if (responseJson.transaction && responseJson.transaction.id) {
+            cardAuthorizationTransactionId = responseJson.transaction.id;
+            document.getElementById('card-capture-transaction-id').value = cardAuthorizationTransactionId;
+            document.getElementById('card-status-transaction-id').value = cardAuthorizationTransactionId;
+            document.getElementById('card-void-transaction-id').value = cardAuthorizationTransactionId;
+            document.getElementById('card-refund-transaction-id').value = cardAuthorizationTransactionId;
+        }
+
+        document.getElementById('card-result').innerHTML =
+            '<div>CARD TRANSACTION ' + (data.doCapture ? 'COMPLETED' : 'AUTHORIZED') + '</div>' +
+            JSON.stringify(responseJson, null, 4);
+    };
+
+    const captureCardTransaction = async () => {
+        const transactionId = document.getElementById('card-capture-transaction-id').value;
+
+        if (!transactionId) {
+            alert('Please enter a Transaction ID to capture');
+            return;
+        }
+
+        try {
+            document.getElementById('card-result').innerHTML = 'Capturing card transaction...';
+
+            const requestBody = {
+                transaction_id: transactionId
+            };
+
+            const response = await fetch('http://localhost:8080/v1/capture-google-pay-transaction', {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('card-result').innerHTML =
+                '<div>CARD CAPTURE COMPLETED</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error capturing card transaction:', err);
+            document.getElementById('card-result').innerHTML = 'Error: ' + err.message;
+        }
+    };
+
+    const voidCardTransaction = async () => {
+        const transactionId = document.getElementById('card-void-transaction-id').value;
+        const orderReference = document.getElementById('card-void-order-reference').value;
+
+        if (!transactionId) {
+            alert('Please enter a Transaction ID to void');
+            return;
+        }
+
+        try {
+            document.getElementById('card-result').innerHTML = 'Voiding card transaction...';
+
+            const requestBody = {
+                transaction_id: transactionId
+            };
+
+            if (orderReference) {
+                requestBody.order_reference = orderReference;
+            }
+
+            const response = await fetch('http://localhost:8080/v1/void-google-pay-transaction', {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('card-result').innerHTML =
+                '<div>CARD VOID TRANSACTION RESULT</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error voiding card transaction:', err);
+            document.getElementById('card-result').innerHTML = 'Error: ' + err.message;
+        }
+    };
+
+    const refundCardTransaction = async () => {
+        const transactionId = document.getElementById('card-refund-transaction-id').value;
+        const amount = document.getElementById('card-refund-amount').value;
+        const currencyCode = document.getElementById('card-refund-currency-code').value;
+        const orderReference = document.getElementById('card-refund-order-reference').value;
+        const email = document.getElementById('card-refund-email').value;
+
+        if (!transactionId || !amount) {
+            alert('Please enter Transaction ID and Amount');
+            return;
+        }
+
+        try {
+            document.getElementById('card-result').innerHTML = 'Processing card refund...';
+
+            const requestBody = {
+                transaction_id: transactionId,
+                amount: parseFloat(amount),
+                currency_code: currencyCode || 'GBP'
+            };
+
+            if (orderReference) {
+                requestBody.order_reference = orderReference;
+            }
+
+            if (email) {
+                requestBody.email = email;
+            }
+
+            const response = await fetch('http://localhost:8080/v1/refund-google-pay-transaction', {
+                method: 'POST',
+                body: JSON.stringify(requestBody),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('card-result').innerHTML =
+                '<div>CARD REFUND TRANSACTION RESULT</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error refunding card transaction:', err);
+            document.getElementById('card-result').innerHTML = 'Error: ' + err.message;
+        }
+    };
+
+    const getCardTransactionStatus = async () => {
+        const transactionId = document.getElementById('card-status-transaction-id').value;
+
+        if (!transactionId) {
+            alert('Please enter a Transaction ID');
+            return;
+        }
+
+        try {
+            document.getElementById('card-result').innerHTML = 'Fetching card transaction status...';
+
+            const response = await fetch('http://localhost:8080/v1/get-google-pay-transaction-status', {
+                method: 'POST',
+                body: JSON.stringify({
+                    transaction_id: transactionId
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const responseJson = await response.json();
+            document.getElementById('card-result').innerHTML =
+                '<div>CARD TRANSACTION STATUS</div>' +
+                JSON.stringify(responseJson, null, 4);
+
+        } catch (err) {
+            console.error('Error fetching card status:', err);
+            document.getElementById('card-result').innerHTML = 'Error: ' + err.message;
+        }
+    };
 </script>
 
 <body>
@@ -1166,5 +1422,125 @@
         </div>
     </div>
 </div>
+
+<!-- Card Payments Section Start -->
+<h2>Card Payments (Elavon HPP/Lightbox)</h2>
+
+<div class="columns">
+    <div class="rows">
+        <h3>Create Card Payment (Immediate Capture)</h3>
+        <label for="card-amount">Amount</label>
+        <input id="card-amount" type="text" value="10.00" class="formItem" placeholder="10.00"/>
+
+        <label for="card-order-number">Order Number</label>
+        <input id="card-order-number" type="text" value="" class="formItem" placeholder="M12300"/>
+
+        <label for="card-currency-code">Currency Code</label>
+        <select id="card-currency-code" class="formItem">
+            <option value="GBP" selected>GBP</option>
+            <option value="EUR">EUR</option>
+            <option value="USD">USD</option>
+            <option value="PLN">PLN</option>
+        </select>
+
+        <label for="card-email">Customer Email</label>
+        <input id="card-email" type="text" value="" class="formItem" placeholder="customer@example.com"/>
+
+        <button class="formItem" onclick="createCardPaymentSession(true)">
+            Pay with Card (Capture)
+        </button>
+    </div>
+
+    <div class="rows">
+        <h3>Create Card Authorization (Capture Later)</h3>
+        <label for="card-auth-amount">Amount</label>
+        <input id="card-auth-amount" type="text" value="10.00" class="formItem" placeholder="10.00"/>
+
+        <label for="card-auth-order-number">Order Number</label>
+        <input id="card-auth-order-number" type="text" value="" class="formItem" placeholder="M12300"/>
+
+        <label for="card-auth-currency-code">Currency Code</label>
+        <select id="card-auth-currency-code" class="formItem">
+            <option value="GBP" selected>GBP</option>
+            <option value="EUR">EUR</option>
+            <option value="USD">USD</option>
+            <option value="PLN">PLN</option>
+        </select>
+
+        <label for="card-auth-email">Customer Email</label>
+        <input id="card-auth-email" type="text" value="" class="formItem" placeholder="customer@example.com"/>
+
+        <button class="formItem" onclick="createCardPaymentSession(false)">
+            Authorize Card (No Capture)
+        </button>
+    </div>
+
+    <div class="rows">
+        <h3>Capture Card Authorization</h3>
+        <label for="card-capture-transaction-id">Transaction ID (from Authorization)</label>
+        <input id="card-capture-transaction-id" type="text" value="" class="formItem" placeholder="Will be filled automatically"/>
+
+        <button class="formItem" onclick="captureCardTransaction()">
+            Capture Card Transaction
+        </button>
+    </div>
+
+    <div class="rows">
+        <h3>Void Card Transaction</h3>
+        <label for="card-void-transaction-id">Transaction ID</label>
+        <input id="card-void-transaction-id" type="text" value="" class="formItem" placeholder="Transaction ID to void"/>
+
+        <label for="card-void-order-reference">Order Reference (optional)</label>
+        <input id="card-void-order-reference" type="text" value="" class="formItem" placeholder="Optional"/>
+
+        <button class="formItem" onclick="voidCardTransaction()">
+            Void Card Transaction
+        </button>
+    </div>
+
+    <div class="rows">
+        <h3>Refund Card Transaction</h3>
+        <label for="card-refund-transaction-id">Transaction ID</label>
+        <input id="card-refund-transaction-id" type="text" value="" class="formItem" placeholder="Transaction ID to refund"/>
+
+        <label for="card-refund-amount">Refund Amount</label>
+        <input id="card-refund-amount" type="text" value="" class="formItem" placeholder="10.00"/>
+
+        <label for="card-refund-currency-code">Currency Code</label>
+        <input id="card-refund-currency-code" type="text" value="GBP" class="formItem" placeholder="GBP"/>
+
+        <label for="card-refund-order-reference">Order Reference (optional)</label>
+        <input id="card-refund-order-reference" type="text" value="" class="formItem" placeholder="Optional"/>
+
+        <label for="card-refund-email">Customer Email (optional - sends receipt)</label>
+        <input id="card-refund-email" type="text" value="" class="formItem" placeholder="Optional"/>
+
+        <button class="formItem" onclick="refundCardTransaction()">
+            Refund Card Transaction
+        </button>
+    </div>
+
+    <div class="rows">
+        <h3>Get Card Transaction Status</h3>
+        <label for="card-status-transaction-id">Transaction ID</label>
+        <input id="card-status-transaction-id" type="text" value="" class="formItem" placeholder="Transaction ID"/>
+
+        <button class="formItem" onclick="getCardTransactionStatus()">
+            Get Transaction Status
+        </button>
+    </div>
+
+    <!-- Card Payments Result Section -->
+    <div class="rows">
+        <h3>Card Result</h3>
+        <div id="card-result" style="white-space: pre; background: #f5f5f5; padding: 15px; border-radius: 4px; border: 1px solid #ddd; min-height: 100px; max-height: 1000px; overflow-y: auto;">
+            Card transaction results will appear here...
+        </div>
+        <button class="formItem" style="margin-top: 10px;" onclick="document.getElementById('card-result').innerHTML = 'Card transaction results will appear here...'">
+            Clear Card Result
+        </button>
+    </div>
+</div>
+<!-- End of Card Payments Section -->
 </body>
 </html>

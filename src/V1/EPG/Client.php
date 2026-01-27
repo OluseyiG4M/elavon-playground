@@ -549,14 +549,6 @@ class Client
             'do_capture' => true,
         ];
 
-        // If specific amount is provided, include it for partial capture
-        if ($amount !== null && $currencyCode !== null) {
-            $updateData['total'] = new PositiveAmountAndCurrency([
-                'amount' => $amount,
-                'currency_code' => $currencyCode,
-            ]);
-        }
-
         $transaction = new Transaction($updateData);
 
         $this->logElavonRequest('Capture Transaction Request', [
@@ -723,6 +715,93 @@ class Client
             'endpoint' => 'POST /transactions',
             'status' => 'success',
             'refund_transaction_id' => $response->getId(),
+            'response_body' => json_decode(json_encode($response), true),
+        ]);
+
+        return $response;
+    }
+
+    public function createPaymentSessionWithCard(
+        string $orderHref,
+        string $account,
+        string $originUrl,
+        string $name,
+        string $address1,
+        string $address2,
+        string $city,
+        string $postCode,
+        string $countryCode,
+        string $email,
+        string $phone,
+        bool $doCapture = true
+    ): PaymentSession
+    {
+        $billTo = new Contact([
+            'full_name' => $name,
+            'street1' => $address1,
+            'street2' => $address2,
+            'city' => $city,
+            'postal_code' => $postCode,
+            'country_code' => $countryCode,
+            'primary_phone' => $phone,
+            'email' => $email,
+        ]);
+
+        // Configure for card payments only
+        $allowedPaymentMethods = [PaymentMethod::CARD];
+        $allowedPaymentMethodOrigins = [PaymentMethodOrigin::CARD];
+
+        $paymentSessionInput = new PaymentSessionInput([
+            'order' => $orderHref,
+            'account' => $this->host . '/accounts/' . $account,
+            'origin_url' => $originUrl,
+            'do_create_transaction' => true,
+            'do_capture' => $doCapture,
+            'bill_to' => $billTo,
+            'allowed_payment_methods' => $allowedPaymentMethods,
+            'allowed_payment_method_origins' => $allowedPaymentMethodOrigins,
+            'hpp_type' => HppType::LIGHTBOX,
+            'shopper_email_address' => $email,
+        ]);
+
+        $this->logElavonRequest('Create Payment Session (Card) Request', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /payment-sessions',
+            'do_capture' => $doCapture,
+            'request_body' => json_decode(json_encode($paymentSessionInput), true),
+        ]);
+
+        $response = $this->paymentSessionsApi->createPaymentSession(
+            self::ACCEPT_JSON,
+            self::API_VERSION,
+            self::ACCEPT_JSON,
+            $paymentSessionInput
+        );
+
+        if ($response instanceof FailureWrapper) {
+            $this->logElavonRequest('Create Payment Session (Card) Error', [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'endpoint' => 'POST /payment-sessions',
+                'error' => $response->getFailures()[0]->getCode(),
+                'description' => $response->getFailures()[0]->getDescription(),
+            ]);
+
+            throw new \Exception(
+                sprintf(
+                    "Error: Code: %s, Desc: %s",
+                    $response->getFailures()[0]->getCode(),
+                    $response->getFailures()[0]->getDescription(),
+                ),
+                $response->getStatus()
+            );
+        }
+
+        $this->logElavonRequest('Create Payment Session (Card) Response', [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'endpoint' => 'POST /payment-sessions',
+            'status' => 'success',
+            'session_id' => $response->getId(),
+            'do_capture' => $doCapture,
             'response_body' => json_decode(json_encode($response), true),
         ]);
 
