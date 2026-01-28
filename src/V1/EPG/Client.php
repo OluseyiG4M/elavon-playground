@@ -749,7 +749,7 @@ class Client
 
         // Configure for card payments only
         $allowedPaymentMethods = [PaymentMethod::CARD];
-        $allowedPaymentMethodOrigins = [PaymentMethodOrigin::CARD];
+        $allowedPaymentMethodOrigins = [PaymentMethodOrigin::CARD, PaymentMethodOrigin::GOOGLE_PAY];
 
         $paymentSessionInput = new PaymentSessionInput([
             'order' => $orderHref,
